@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -90,6 +91,7 @@ fun ClipboardWindowContent(
         color = Color(0xFF111827),
         fontWeight = FontWeight.SemiBold,
     )
+    val windowShape = RoundedCornerShape(28.dp)
     val relativeTimeTextStyle = MaterialTheme.typography.labelMedium.copy(
         color = Color(0xFF6B7280),
         fontWeight = FontWeight.Medium,
@@ -154,6 +156,13 @@ fun ClipboardWindowContent(
         modifier = Modifier
             .width(600.dp)
             .heightIn(max = 520.dp)
+            .shadow(
+                elevation = 14.dp,
+                shape = windowShape,
+                clip = false,
+                ambientColor = Color(0x14000000),
+                spotColor = Color(0x1A000000),
+            )
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) {
                     return@onPreviewKeyEvent false
@@ -186,19 +195,21 @@ fun ClipboardWindowContent(
             }
             .border(
                 width = 1.dp,
-                color = Color(0x1A0F172A),
-                shape = RoundedCornerShape(28.dp),
+                color = Color(0x120F172A),
+                shape = windowShape,
             ),
         color = Color(0xFFF6F3EC),
-        shape = RoundedCornerShape(28.dp),
-        shadowElevation = 28.dp,
+        shape = windowShape,
+        shadowElevation = 0.dp,
     ) {
         Box(
             modifier = Modifier
                 .background(Color(0xFFF6F3EC))
                 .padding(vertical = 14.dp),
         ) {
-            Column {
+            Column(
+                verticalArrangement = Arrangement.Top,
+            ) {
                 SearchField(
                     query = uiState.searchQuery,
                     focusRequester = focusRequester,
