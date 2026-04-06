@@ -6,6 +6,7 @@ data class MainUiState(
     val searchQuery: String = "",
     val filteredItems: List<ClipboardItem> = emptyList(),
     val selectedItemId: String? = null,
+    val toastMessage: String? = null,
 ) {
     val selectedItem: ClipboardItem?
         get() = filteredItems.firstOrNull { it.id == selectedItemId }

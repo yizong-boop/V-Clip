@@ -9,6 +9,7 @@ import com.example.macclipboardmanager.core.hotkey.HotkeyModifier
 import com.example.macclipboardmanager.domain.clipboard.ClipboardItem
 import com.example.macclipboardmanager.domain.clipboard.ClipboardRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +30,7 @@ class MainViewModel(
     private val globalHotkeyManager: GlobalHotkeyManager,
     private val defaultHotkey: Hotkey = DEFAULT_HOTKEY,
     private val clock: () -> Long = { System.currentTimeMillis() },
+    private val toastDurationMillis: Long = 3_000L,
     coroutineScope: CoroutineScope? = null,
 ) : ViewModel(coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Default)) {
 
@@ -42,6 +44,7 @@ class MainViewModel(
 
     private var started = false
     private var cleanedUp = false
+    private var clearToastJob: Job? = null
 
     val uiState: StateFlow<MainUiState> = mutableUiState.asStateFlow()
     val effects: SharedFlow<MainEffect> = mutableEffects.asSharedFlow()
@@ -51,7 +54,11 @@ class MainViewModel(
             combine(repository.items, searchQuery) { items, query ->
                 buildState(items = items, searchQuery = query)
             }.collect { state ->
-                mutableUiState.value = state
+                mutableUiState.update { currentState ->
+                    state.copy(
+                        toastMessage = currentState.toastMessage,
+                    )
+                }
             }
         }
     }
@@ -117,6 +124,22 @@ class MainViewModel(
         )
     }
 
+    fun showToast(message: String) {
+        clearToastJob?.cancel()
+        updateToastMessage(message)
+        clearToastJob = workerScope.launch {
+            delay(toastDurationMillis)
+            clearToastJob = null
+            updateToastMessage(null)
+        }
+    }
+
+    fun clearToast() {
+        clearToastJob?.cancel()
+        clearToastJob = null
+        updateToastMessage(null)
+    }
+
     fun close() {
         cleanup()
     }
@@ -167,6 +190,16 @@ class MainViewModel(
         }
     }
 
+    private fun updateToastMessage(message: String?) {
+        mutableUiState.update { currentState ->
+            if (currentState.toastMessage == message) {
+                currentState
+            } else {
+                currentState.copy(toastMessage = message)
+            }
+        }
+    }
+
     private fun cleanup() {
         if (cleanedUp) {
             return
@@ -177,6 +210,7 @@ class MainViewModel(
         globalHotkeyManager.unregister()
         clipboardMonitor.close()
         globalHotkeyManager.close()
+        clearToastJob?.cancel()
         workerScope.cancel()
         if (ownsCoroutineScope) {
             viewModelScope.cancel()

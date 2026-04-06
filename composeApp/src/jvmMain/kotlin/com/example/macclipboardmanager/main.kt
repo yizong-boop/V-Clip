@@ -66,6 +66,7 @@ fun main() {
         var isWindowFocused by remember { mutableStateOf(false) }
         var ignoreBlurBeforeEpochMillis by remember { mutableStateOf(0L) }
         var previousFrontmostAppProcessId by remember { mutableStateOf<Int?>(null) }
+        var isFailureToastWindowVisible by remember { mutableStateOf(false) }
 
         DisposableEffect(Unit) {
             viewModel.start()
@@ -78,6 +79,8 @@ fun main() {
             viewModel.effects.collect { effect ->
                 when (effect) {
                     is MainEffect.ShowWindow -> {
+                        viewModel.clearToast()
+                        isFailureToastWindowVisible = false
                         viewModel.clearSearchQuery()
                         previousFrontmostAppProcessId = MacAppActivation.captureFrontmostApplicationProcessId()
                         MacAppActivation.requestForeground()
@@ -100,9 +103,24 @@ fun main() {
                                 }
                                 previousFrontmostAppProcessId = null
                             },
+                            onAutoPasteFailure = {
+                                isFailureToastWindowVisible = true
+                                spotlightWindowState.show()
+                                MacAppActivation.requestForeground()
+                                viewModel.showToast(
+                                    "粘贴失败：请在系统设置 -> 隐私与安全性 中开启辅助功能权限",
+                                )
+                            },
                         )
                     }
                 }
+            }
+        }
+
+        LaunchedEffect(uiState.toastMessage, isFailureToastWindowVisible) {
+            if (isFailureToastWindowVisible && uiState.toastMessage == null && spotlightWindowState.isVisible) {
+                spotlightWindowState.hide()
+                isFailureToastWindowVisible = false
             }
         }
 
@@ -123,6 +141,8 @@ fun main() {
                     if (spotlightWindowState.isVisible && now >= ignoreBlurBeforeEpochMillis) {
                         spotlightWindowState.hide()
                         viewModel.clearSearchQuery()
+                        viewModel.clearToast()
+                        isFailureToastWindowVisible = false
                         isWindowFocused = false
                     }
                 }
@@ -213,6 +233,8 @@ fun main() {
                     onHideRequest = {
                         spotlightWindowState.hide()
                         viewModel.clearSearchQuery()
+                        viewModel.clearToast()
+                        isFailureToastWindowVisible = false
                     },
                     onSelectPrevious = viewModel::selectPrevious,
                     onSelectNext = viewModel::selectNext,

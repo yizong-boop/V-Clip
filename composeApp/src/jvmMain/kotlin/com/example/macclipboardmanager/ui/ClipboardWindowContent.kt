@@ -1,22 +1,30 @@
 package com.example.macclipboardmanager.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
@@ -185,47 +193,95 @@ fun ClipboardWindowContent(
         shape = RoundedCornerShape(28.dp),
         shadowElevation = 28.dp,
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .background(Color(0xFFF6F3EC))
                 .padding(vertical = 14.dp),
         ) {
-            SearchField(
-                query = uiState.searchQuery,
-                focusRequester = focusRequester,
-                focusRequestKey = focusRequestKey,
-                onValueChange = onSearchQueryChange,
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                color = Color(0x140F172A),
-            )
-            if (uiState.filteredItems.isEmpty()) {
-                EmptyClipboardState()
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .heightIn(max = 430.dp)
-                        .onSizeChanged { listViewportWidthPx = it.width },
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    itemsIndexed(
-                        items = uiState.filteredItems,
-                        key = { _, item -> item.id },
-                    ) { _, item ->
-                        ClipboardListItem(
-                            item = item,
-                            isSelected = item.id == uiState.selectedItemId,
-                            relativeTime = relativeTimeFormatter(item.copiedAtEpochMillis),
-                            onClick = {
-                                onSelectItem(item.id)
-                                onConfirmSelection()
-                            },
-                        )
+            Column {
+                SearchField(
+                    query = uiState.searchQuery,
+                    focusRequester = focusRequester,
+                    focusRequestKey = focusRequestKey,
+                    onValueChange = onSearchQueryChange,
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                    color = Color(0x140F172A),
+                )
+                if (uiState.filteredItems.isEmpty()) {
+                    EmptyClipboardState()
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .heightIn(max = 430.dp)
+                            .onSizeChanged { listViewportWidthPx = it.width },
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        itemsIndexed(
+                            items = uiState.filteredItems,
+                            key = { _, item -> item.id },
+                        ) { _, item ->
+                            ClipboardListItem(
+                                item = item,
+                                isSelected = item.id == uiState.selectedItemId,
+                                relativeTime = relativeTimeFormatter(item.copiedAtEpochMillis),
+                                onClick = {
+                                    onSelectItem(item.id)
+                                    onConfirmSelection()
+                                },
+                            )
+                        }
                     }
                 }
             }
+
+            AnimatedVisibility(
+                visible = uiState.toastMessage != null,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp),
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
+            ) {
+                ToastBubble(
+                    message = uiState.toastMessage.orEmpty(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToastBubble(message: String) {
+    Surface(
+        color = Color(0xE6151720),
+        contentColor = Color(0xFFF8FAFC),
+        shape = CircleShape,
+        tonalElevation = 0.dp,
+        shadowElevation = 10.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        color = Color(0xFFF97316),
+                        shape = CircleShape,
+                    ),
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = Color(0xFFF8FAFC),
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
         }
     }
 }

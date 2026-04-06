@@ -88,12 +88,13 @@ class ConfirmSelectionFlowTest {
             clipboardPasteController = controller,
             onHideWindow = {},
             onClearSearchQuery = {},
+            onAutoPasteFailure = { logs += "callback:${it.message}" },
             delayFn = {},
             logger = logs::add,
         )
 
         assertEquals(
-            listOf("Auto-paste failed: not allowed", "Grant permission"),
+            listOf("callback:not allowed", "Auto-paste failed: not allowed", "Grant permission"),
             logs,
         )
     }

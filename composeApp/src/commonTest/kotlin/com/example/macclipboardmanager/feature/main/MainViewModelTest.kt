@@ -17,7 +17,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -178,6 +180,43 @@ class MainViewModelTest {
     }
 
     @Test
+    fun showToastDisplaysThenClearsMessageAfterDelay() = runTest {
+        val viewModel = createViewModel(scope = this, toastDurationMillis = 3_000L)
+
+        viewModel.showToast("failed")
+        assertEquals("failed", viewModel.uiState.value.toastMessage)
+
+        advanceTimeBy(2_999L)
+        runCurrent()
+        assertEquals("failed", viewModel.uiState.value.toastMessage)
+
+        advanceTimeBy(1L)
+        runCurrent()
+        assertNull(viewModel.uiState.value.toastMessage)
+        viewModel.close()
+    }
+
+    @Test
+    fun showToastResetsCountdownWhenCalledAgain() = runTest {
+        val viewModel = createViewModel(scope = this, toastDurationMillis = 3_000L)
+
+        viewModel.showToast("first")
+        advanceTimeBy(2_000L)
+
+        viewModel.showToast("second")
+        assertEquals("second", viewModel.uiState.value.toastMessage)
+
+        advanceTimeBy(2_999L)
+        runCurrent()
+        assertEquals("second", viewModel.uiState.value.toastMessage)
+
+        advanceTimeBy(1L)
+        runCurrent()
+        assertNull(viewModel.uiState.value.toastMessage)
+        viewModel.close()
+    }
+
+    @Test
     fun clearReleasesMonitorAndHotkeys() = runTest {
         val monitor = FakeClipboardMonitor()
         val hotkeys = FakeGlobalHotkeyManager()
@@ -198,6 +237,7 @@ class MainViewModelTest {
         monitor: FakeClipboardMonitor = FakeClipboardMonitor(),
         hotkeys: FakeGlobalHotkeyManager = FakeGlobalHotkeyManager(),
         scope: TestScope,
+        toastDurationMillis: Long = 3_000L,
     ): MainViewModel =
         run {
             var effectClock = 0L
@@ -206,6 +246,7 @@ class MainViewModelTest {
                 clipboardMonitor = monitor,
                 globalHotkeyManager = hotkeys,
                 clock = { ++effectClock },
+                toastDurationMillis = toastDurationMillis,
                 coroutineScope = scope,
             )
         }

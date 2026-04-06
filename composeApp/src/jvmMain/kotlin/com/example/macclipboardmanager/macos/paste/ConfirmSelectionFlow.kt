@@ -9,6 +9,7 @@ internal suspend fun handleConfirmedSelection(
     onHideWindow: () -> Unit,
     onClearSearchQuery: () -> Unit,
     onRestorePreviousAppFocus: () -> Unit = {},
+    onAutoPasteFailure: (AutoPasteResult.Failure) -> Unit = {},
     delayMillis: Long = 100L,
     delayFn: suspend (Long) -> Unit = ::delay,
     logger: (String) -> Unit = { message -> System.err.println(message) },
@@ -24,6 +25,7 @@ internal suspend fun handleConfirmedSelection(
             when (val pasteResult = clipboardPasteController.pasteToFrontmostApp()) {
                 AutoPasteResult.Success -> Unit
                 is AutoPasteResult.Failure -> {
+                    onAutoPasteFailure(pasteResult)
                     logger("Auto-paste failed: ${pasteResult.message}")
                     pasteResult.permissionHint?.let(logger)
                 }
