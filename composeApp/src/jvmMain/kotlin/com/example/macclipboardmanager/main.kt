@@ -1,0 +1,207 @@
+package com.example.macclipboardmanager
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
+import com.example.macclipboardmanager.domain.clipboard.ClipboardRepository
+import com.example.macclipboardmanager.feature.main.MainEffect
+import com.example.macclipboardmanager.feature.main.MainViewModel
+import com.example.macclipboardmanager.macos.MacAppActivation
+import com.example.macclipboardmanager.macos.createClipboardMonitor
+import com.example.macclipboardmanager.macos.createGlobalHotkeyManager
+import com.example.macclipboardmanager.smoke.MacSmokeDemo
+import com.example.macclipboardmanager.ui.ClipboardWindowContent
+import com.example.macclipboardmanager.ui.SpotlightWindowState
+import com.example.macclipboardmanager.ui.formatRelativeTime
+import kotlinx.coroutines.delay
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
+
+fun main() {
+    if (MacSmokeDemo.isEnabled()) {
+        MacSmokeDemo.run()
+        return
+    }
+
+    application {
+        val repository = remember { ClipboardRepository() }
+        val clipboardMonitor = remember { createClipboardMonitor() }
+        val hotkeyManager = remember { createGlobalHotkeyManager() }
+        val viewModel = remember {
+            MainViewModel(
+                repository = repository,
+                clipboardMonitor = clipboardMonitor,
+                globalHotkeyManager = hotkeyManager,
+            )
+        }
+        val windowState = rememberWindowState(
+            width = 640.dp,
+            height = 540.dp,
+            position = WindowPosition(Alignment.Center),
+        )
+        val spotlightWindowState = remember { SpotlightWindowState() }
+        val focusRequester = remember { FocusRequester() }
+        val listState = rememberLazyListState()
+        val uiState by viewModel.uiState.collectAsState()
+        var focusRequestKey by remember { mutableStateOf(0) }
+        var isWindowFocused by remember { mutableStateOf(false) }
+        var ignoreBlurBeforeEpochMillis by remember { mutableStateOf(0L) }
+
+        DisposableEffect(Unit) {
+            viewModel.start()
+            onDispose {
+                viewModel.close()
+            }
+        }
+
+        LaunchedEffect(viewModel) {
+            viewModel.effects.collect { effect ->
+                when (effect) {
+                    is MainEffect.ShowWindow -> {
+                        viewModel.clearSearchQuery()
+                        MacAppActivation.requestForeground()
+                        spotlightWindowState.show()
+                        focusRequestKey += 1
+                    }
+                }
+            }
+        }
+
+        Window(
+            onCloseRequest = ::exitApplication,
+            state = windowState,
+            visible = spotlightWindowState.isVisible,
+            undecorated = true,
+            transparent = true,
+            alwaysOnTop = true,
+            resizable = false,
+            title = "V-Clip",
+            onPreviewKeyEvent = { false },
+        ) {
+            DisposableEffect(window) {
+                fun hideWindow() {
+                    val now = System.currentTimeMillis()
+                    if (spotlightWindowState.isVisible && now >= ignoreBlurBeforeEpochMillis) {
+                        spotlightWindowState.hide()
+                        viewModel.clearSearchQuery()
+                        isWindowFocused = false
+                    }
+                }
+
+                val windowListener = object : WindowAdapter() {
+                    override fun windowGainedFocus(event: WindowEvent?) {
+                        isWindowFocused = true
+                    }
+
+                    override fun windowLostFocus(event: WindowEvent?) {
+                        isWindowFocused = false
+                        hideWindow()
+                    }
+
+                    override fun windowDeactivated(event: WindowEvent?) {
+                        isWindowFocused = false
+                        hideWindow()
+                    }
+                }
+
+                window.addWindowFocusListener(windowListener)
+                window.addWindowListener(windowListener)
+                onDispose {
+                    window.removeWindowFocusListener(windowListener)
+                    window.removeWindowListener(windowListener)
+                }
+            }
+
+            LaunchedEffect(spotlightWindowState.isVisible) {
+                if (spotlightWindowState.isVisible) {
+                    isWindowFocused = false
+                    ignoreBlurBeforeEpochMillis = System.currentTimeMillis() + 350L
+                    if (uiState.filteredItems.isNotEmpty()) {
+                        listState.scrollToItem(0)
+                    }
+                    repeat(8) {
+                        withFrameNanos { }
+                        MacAppActivation.requestForeground()
+                        window.isVisible = true
+                        window.focusableWindowState = true
+                        window.toFront()
+                        window.requestFocus()
+                        window.requestFocusInWindow()
+                        window.rootPane.requestFocusInWindow()
+                        focusRequester.requestFocus()
+                        delay(45L)
+                        if (isWindowFocused || window.isFocused) {
+                            return@LaunchedEffect
+                        }
+                    }
+                } else {
+                    isWindowFocused = false
+                    ignoreBlurBeforeEpochMillis = 0L
+                }
+            }
+
+            LaunchedEffect(spotlightWindowState.isVisible, isWindowFocused, focusRequestKey) {
+                if (spotlightWindowState.isVisible && isWindowFocused) {
+                    repeat(5) {
+                        withFrameNanos { }
+                        MacAppActivation.requestForeground()
+                        window.toFront()
+                        window.requestFocusInWindow()
+                        window.rootPane.requestFocusInWindow()
+                        focusRequester.requestFocus()
+                        delay(30L)
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                ClipboardWindowContent(
+                    uiState = uiState,
+                    focusRequester = focusRequester,
+                    focusRequestKey = focusRequestKey,
+                    listState = listState,
+                    relativeTimeFormatter = { copiedAt ->
+                        formatRelativeTime(
+                            copiedAtEpochMillis = copiedAt,
+                            nowEpochMillis = System.currentTimeMillis(),
+                        )
+                    },
+                    onSearchQueryChange = viewModel::updateSearchQuery,
+                    onConfirmSelection = {
+                        uiState.selectedItem?.let { selectedItem ->
+                            println("Selected clipboard text: ${selectedItem.text}")
+                        }
+                        spotlightWindowState.hide()
+                        viewModel.clearSearchQuery()
+                    },
+                    onHideRequest = {
+                        spotlightWindowState.hide()
+                        viewModel.clearSearchQuery()
+                    },
+                    onSelectPrevious = viewModel::selectPrevious,
+                    onSelectNext = viewModel::selectNext,
+                    onSelectItem = viewModel::selectItem,
+                )
+            }
+        }
+    }
+}

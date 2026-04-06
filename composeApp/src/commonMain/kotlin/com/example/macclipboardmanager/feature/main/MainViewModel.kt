@@ -1,0 +1,183 @@
+package com.example.macclipboardmanager.feature.main
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.macclipboardmanager.core.clipboard.ClipboardMonitor
+import com.example.macclipboardmanager.core.hotkey.GlobalHotkeyManager
+import com.example.macclipboardmanager.core.hotkey.Hotkey
+import com.example.macclipboardmanager.core.hotkey.HotkeyModifier
+import com.example.macclipboardmanager.domain.clipboard.ClipboardItem
+import com.example.macclipboardmanager.domain.clipboard.ClipboardRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+class MainViewModel(
+    private val repository: ClipboardRepository,
+    private val clipboardMonitor: ClipboardMonitor,
+    private val globalHotkeyManager: GlobalHotkeyManager,
+    private val defaultHotkey: Hotkey = DEFAULT_HOTKEY,
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    coroutineScope: CoroutineScope? = null,
+) : ViewModel(coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Default)) {
+
+    private val mutableUiState = MutableStateFlow(MainUiState())
+    private val mutableEffects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
+    private val searchQuery = MutableStateFlow("")
+    private val ownsCoroutineScope = coroutineScope == null
+    private val workerScope = CoroutineScope(
+        viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]),
+    )
+
+    private var started = false
+    private var cleanedUp = false
+
+    val uiState: StateFlow<MainUiState> = mutableUiState.asStateFlow()
+    val effects: SharedFlow<MainEffect> = mutableEffects.asSharedFlow()
+
+    init {
+        workerScope.launch {
+            combine(repository.items, searchQuery) { items, query ->
+                buildState(items = items, searchQuery = query)
+            }.collect { state ->
+                mutableUiState.value = state
+            }
+        }
+    }
+
+    fun start() {
+        if (started) {
+            return
+        }
+        started = true
+
+        clipboardMonitor.start()
+        globalHotkeyManager.register(defaultHotkey)
+
+        workerScope.launch {
+            clipboardMonitor.events.collect { event ->
+                repository.add(event.text)
+            }
+        }
+
+        workerScope.launch {
+            globalHotkeyManager.activations.collect {
+                mutableEffects.emit(
+                    MainEffect.ShowWindow(
+                        requestedAtEpochMillis = clock(),
+                    ),
+                )
+            }
+        }
+    }
+
+    fun updateSearchQuery(query: String) {
+        searchQuery.value = query
+    }
+
+    fun clearSearchQuery() {
+        searchQuery.value = ""
+    }
+
+    fun selectItem(itemId: String) {
+        mutableUiState.update { currentState ->
+            if (currentState.filteredItems.none { it.id == itemId }) {
+                currentState
+            } else {
+                currentState.copy(selectedItemId = itemId)
+            }
+        }
+    }
+
+    fun selectNext() {
+        moveSelection(step = 1)
+    }
+
+    fun selectPrevious() {
+        moveSelection(step = -1)
+    }
+
+    fun close() {
+        cleanup()
+    }
+
+    override fun onCleared() {
+        cleanup()
+    }
+
+    private fun buildState(
+        items: List<ClipboardItem>,
+        searchQuery: String,
+    ): MainUiState {
+        val filteredItems = filterItems(items = items, searchQuery = searchQuery)
+        return MainUiState(
+            searchQuery = searchQuery,
+            filteredItems = filteredItems,
+            selectedItemId = filteredItems.firstOrNull()?.id,
+        )
+    }
+
+    private fun filterItems(
+        items: List<ClipboardItem>,
+        searchQuery: String,
+    ): List<ClipboardItem> {
+        if (searchQuery.isBlank()) {
+            return items
+        }
+
+        return items.filter { item ->
+            item.text.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    private fun moveSelection(step: Int) {
+        mutableUiState.update { currentState ->
+            if (currentState.filteredItems.isEmpty()) {
+                return@update currentState.copy(selectedItemId = null)
+            }
+
+            val currentIndex = currentState.filteredItems.indexOfFirst { it.id == currentState.selectedItemId }
+                .takeIf { it >= 0 }
+                ?: 0
+            val nextIndex = (currentIndex + step).coerceIn(0, currentState.filteredItems.lastIndex)
+
+            currentState.copy(
+                selectedItemId = currentState.filteredItems[nextIndex].id,
+            )
+        }
+    }
+
+    private fun cleanup() {
+        if (cleanedUp) {
+            return
+        }
+        cleanedUp = true
+
+        clipboardMonitor.stop()
+        globalHotkeyManager.unregister()
+        clipboardMonitor.close()
+        globalHotkeyManager.close()
+        workerScope.cancel()
+        if (ownsCoroutineScope) {
+            viewModelScope.cancel()
+        }
+    }
+
+    companion object {
+        val DEFAULT_HOTKEY = Hotkey(
+            keyCode = 9,
+            modifiers = setOf(HotkeyModifier.OPTION),
+        )
+    }
+}
