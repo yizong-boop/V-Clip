@@ -3,6 +3,8 @@ package com.example.macclipboardmanager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
@@ -64,6 +66,7 @@ fun main() {
         val listState = rememberLazyListState()
         val uiState by viewModel.uiState.collectAsState()
         var focusRequestKey by remember { mutableStateOf(0) }
+        var pendingSearchFieldFocus by remember { mutableStateOf(false) }
         var isWindowFocused by remember { mutableStateOf(false) }
         var ignoreBlurBeforeEpochMillis by remember { mutableStateOf(0L) }
         var previousFrontmostAppProcessId by remember { mutableStateOf<Int?>(null) }
@@ -86,7 +89,7 @@ fun main() {
                         previousFrontmostAppProcessId = MacAppActivation.captureFrontmostApplicationProcessId()
                         MacAppActivation.requestForeground()
                         spotlightWindowState.show()
-                        focusRequestKey += 1
+                        pendingSearchFieldFocus = true
                     }
 
                     is MainEffect.ConfirmSelection -> {
@@ -136,21 +139,36 @@ fun main() {
             title = "V-Clip",
             onPreviewKeyEvent = { false },
         ) {
+            fun requestSearchFieldFocusIfNeeded() {
+                if (pendingSearchFieldFocus) {
+                    focusRequestKey += 1
+                    pendingSearchFieldFocus = false
+                }
+            }
+
+            fun hideWindowContent() {
+                spotlightWindowState.hide()
+                viewModel.clearSearchQuery()
+                viewModel.clearToast()
+                isFailureToastWindowVisible = false
+                isWindowFocused = false
+                pendingSearchFieldFocus = false
+            }
+
+            val backgroundClickInteraction = remember { MutableInteractionSource() }
+
             DisposableEffect(window) {
                 fun hideWindow() {
                     val now = System.currentTimeMillis()
                     if (spotlightWindowState.isVisible && now >= ignoreBlurBeforeEpochMillis) {
-                        spotlightWindowState.hide()
-                        viewModel.clearSearchQuery()
-                        viewModel.clearToast()
-                        isFailureToastWindowVisible = false
-                        isWindowFocused = false
+                        hideWindowContent()
                     }
                 }
 
                 val windowListener = object : WindowAdapter() {
                     override fun windowGainedFocus(event: WindowEvent?) {
                         isWindowFocused = true
+                        requestSearchFieldFocusIfNeeded()
                     }
 
                     override fun windowLostFocus(event: WindowEvent?) {
@@ -188,9 +206,9 @@ fun main() {
                         window.requestFocus()
                         window.requestFocusInWindow()
                         window.rootPane.requestFocusInWindow()
-                        focusRequester.requestFocus()
                         delay(45L)
                         if (isWindowFocused || window.isFocused) {
+                            requestSearchFieldFocusIfNeeded()
                             return@LaunchedEffect
                         }
                     }
@@ -200,49 +218,45 @@ fun main() {
                 }
             }
 
-            LaunchedEffect(spotlightWindowState.isVisible, isWindowFocused, focusRequestKey) {
-                if (spotlightWindowState.isVisible && isWindowFocused) {
-                    repeat(5) {
-                        withFrameNanos { }
-                        MacAppActivation.requestForeground()
-                        window.toFront()
-                        window.requestFocusInWindow()
-                        window.rootPane.requestFocusInWindow()
-                        focusRequester.requestFocus()
-                        delay(30L)
-                    }
-                }
-            }
-
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 10.dp),
-                contentAlignment = Alignment.TopCenter,
+                modifier = Modifier.fillMaxSize(),
             ) {
-                ClipboardWindowContent(
-                    uiState = uiState,
-                    focusRequester = focusRequester,
-                    focusRequestKey = focusRequestKey,
-                    listState = listState,
-                    relativeTimeFormatter = { copiedAt ->
-                        formatRelativeTime(
-                            copiedAtEpochMillis = copiedAt,
-                            nowEpochMillis = System.currentTimeMillis(),
-                        )
-                    },
-                    onSearchQueryChange = viewModel::updateSearchQuery,
-                    onConfirmSelection = viewModel::confirmSelection,
-                    onHideRequest = {
-                        spotlightWindowState.hide()
-                        viewModel.clearSearchQuery()
-                        viewModel.clearToast()
-                        isFailureToastWindowVisible = false
-                    },
-                    onSelectPrevious = viewModel::selectPrevious,
-                    onSelectNext = viewModel::selectNext,
-                    onSelectItem = viewModel::selectItem,
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = backgroundClickInteraction,
+                            indication = null,
+                        ) {
+                            hideWindowContent()
+                        },
                 )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 10.dp),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    ClipboardWindowContent(
+                        uiState = uiState,
+                        focusRequester = focusRequester,
+                        focusRequestKey = focusRequestKey,
+                        listState = listState,
+                        relativeTimeFormatter = { copiedAt ->
+                            formatRelativeTime(
+                                copiedAtEpochMillis = copiedAt,
+                                nowEpochMillis = System.currentTimeMillis(),
+                            )
+                        },
+                        onSearchQueryChange = viewModel::updateSearchQuery,
+                        onConfirmSelection = viewModel::confirmSelection,
+                        onHideRequest = ::hideWindowContent,
+                        onSelectPrevious = viewModel::selectPrevious,
+                        onSelectNext = viewModel::selectNext,
+                        onSelectItem = viewModel::selectItem,
+                    )
+                }
             }
         }
     }
