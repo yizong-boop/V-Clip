@@ -108,6 +108,15 @@ class MainViewModel(
         moveSelection(step = -1)
     }
 
+    fun confirmSelection() {
+        val selectedText = mutableUiState.value.selectedItem?.text ?: return
+        mutableEffects.tryEmit(
+            MainEffect.ConfirmSelection(
+                text = selectedText,
+            ),
+        )
+    }
+
     fun close() {
         cleanup()
     }

@@ -2,6 +2,7 @@ package com.example.macclipboardmanager.feature.main
 
 import com.example.macclipboardmanager.core.clipboard.ClipboardMonitor
 import com.example.macclipboardmanager.core.clipboard.ClipboardTextEvent
+import com.example.macclipboardmanager.core.clipboard.ClipboardWriteResult
 import com.example.macclipboardmanager.core.hotkey.GlobalHotkeyManager
 import com.example.macclipboardmanager.core.hotkey.Hotkey
 import com.example.macclipboardmanager.core.hotkey.HotkeyActivation
@@ -19,8 +20,10 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModelTest {
@@ -137,6 +140,44 @@ class MainViewModelTest {
     }
 
     @Test
+    fun confirmSelectionEmitsSelectedTextEffect() = runTest {
+        val repository = testRepository()
+        repository.add("hello")
+        val viewModel = createViewModel(repository = repository, scope = this)
+        val effect = async {
+            viewModel.effects.first { it is MainEffect.ConfirmSelection }
+        }
+
+        advanceUntilIdle()
+        viewModel.confirmSelection()
+
+        assertEquals(
+            MainEffect.ConfirmSelection(text = "hello"),
+            effect.await(),
+        )
+        viewModel.close()
+    }
+
+    @Test
+    fun confirmSelectionDoesNothingWhenNothingIsSelected() = runTest {
+        val viewModel = createViewModel(scope = this)
+        var emitted = false
+        val collector = backgroundScope.async {
+            viewModel.effects.collect {
+                emitted = true
+            }
+        }
+
+        advanceUntilIdle()
+        viewModel.confirmSelection()
+        advanceUntilIdle()
+
+        assertFalse(emitted)
+        collector.cancel()
+        viewModel.close()
+    }
+
+    @Test
     fun clearReleasesMonitorAndHotkeys() = runTest {
         val monitor = FakeClipboardMonitor()
         val hotkeys = FakeGlobalHotkeyManager()
@@ -206,6 +247,11 @@ class MainViewModelTest {
             }
             started = false
             stopCalls++
+        }
+
+        override fun writePlainText(text: String): ClipboardWriteResult {
+            assertTrue(text.isNotEmpty())
+            return ClipboardWriteResult.Success(changeCount = 1L)
         }
 
         override fun close() {

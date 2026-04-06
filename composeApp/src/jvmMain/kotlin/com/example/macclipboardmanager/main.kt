@@ -24,7 +24,9 @@ import com.example.macclipboardmanager.feature.main.MainEffect
 import com.example.macclipboardmanager.feature.main.MainViewModel
 import com.example.macclipboardmanager.macos.MacAppActivation
 import com.example.macclipboardmanager.macos.createClipboardMonitor
+import com.example.macclipboardmanager.macos.createClipboardPasteController
 import com.example.macclipboardmanager.macos.createGlobalHotkeyManager
+import com.example.macclipboardmanager.macos.paste.handleConfirmedSelection
 import com.example.macclipboardmanager.smoke.MacSmokeDemo
 import com.example.macclipboardmanager.ui.ClipboardWindowContent
 import com.example.macclipboardmanager.ui.SpotlightWindowState
@@ -42,6 +44,7 @@ fun main() {
     application {
         val repository = remember { ClipboardRepository() }
         val clipboardMonitor = remember { createClipboardMonitor() }
+        val clipboardPasteController = remember { createClipboardPasteController(clipboardMonitor) }
         val hotkeyManager = remember { createGlobalHotkeyManager() }
         val viewModel = remember {
             MainViewModel(
@@ -62,6 +65,7 @@ fun main() {
         var focusRequestKey by remember { mutableStateOf(0) }
         var isWindowFocused by remember { mutableStateOf(false) }
         var ignoreBlurBeforeEpochMillis by remember { mutableStateOf(0L) }
+        var previousFrontmostAppProcessId by remember { mutableStateOf<Int?>(null) }
 
         DisposableEffect(Unit) {
             viewModel.start()
@@ -75,9 +79,28 @@ fun main() {
                 when (effect) {
                     is MainEffect.ShowWindow -> {
                         viewModel.clearSearchQuery()
+                        previousFrontmostAppProcessId = MacAppActivation.captureFrontmostApplicationProcessId()
                         MacAppActivation.requestForeground()
                         spotlightWindowState.show()
                         focusRequestKey += 1
+                    }
+
+                    is MainEffect.ConfirmSelection -> {
+                        handleConfirmedSelection(
+                            text = effect.text,
+                            clipboardPasteController = clipboardPasteController,
+                            onHideWindow = { spotlightWindowState.hide() },
+                            onClearSearchQuery = viewModel::clearSearchQuery,
+                            onRestorePreviousAppFocus = {
+                                val processId = previousFrontmostAppProcessId
+                                if (processId == null || !MacAppActivation.reactivateApplication(processId)) {
+                                    System.err.println(
+                                        "Unable to reactivate the previously focused application before auto-paste.",
+                                    )
+                                }
+                                previousFrontmostAppProcessId = null
+                            },
+                        )
                     }
                 }
             }
@@ -186,13 +209,7 @@ fun main() {
                         )
                     },
                     onSearchQueryChange = viewModel::updateSearchQuery,
-                    onConfirmSelection = {
-                        uiState.selectedItem?.let { selectedItem ->
-                            println("Selected clipboard text: ${selectedItem.text}")
-                        }
-                        spotlightWindowState.hide()
-                        viewModel.clearSearchQuery()
-                    },
+                    onConfirmSelection = viewModel::confirmSelection,
                     onHideRequest = {
                         spotlightWindowState.hide()
                         viewModel.clearSearchQuery()

@@ -9,5 +9,7 @@ interface ClipboardMonitor {
 
     fun stop()
 
+    fun writePlainText(text: String): ClipboardWriteResult
+
     fun close()
 }

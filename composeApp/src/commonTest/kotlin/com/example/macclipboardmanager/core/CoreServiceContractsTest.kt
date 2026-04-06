@@ -2,6 +2,7 @@ package com.example.macclipboardmanager.core
 
 import com.example.macclipboardmanager.core.clipboard.ClipboardMonitor
 import com.example.macclipboardmanager.core.clipboard.ClipboardTextEvent
+import com.example.macclipboardmanager.core.clipboard.ClipboardWriteResult
 import com.example.macclipboardmanager.core.hotkey.GlobalHotkeyManager
 import com.example.macclipboardmanager.core.hotkey.Hotkey
 import com.example.macclipboardmanager.core.hotkey.HotkeyActivation
@@ -127,6 +128,9 @@ class CoreServiceContractsTest {
             started = false
             stopCalls++
         }
+
+        override fun writePlainText(text: String): ClipboardWriteResult =
+            ClipboardWriteResult.Success(changeCount = deliveredTexts.size.toLong() + 1L)
 
         override fun close() {
             if (closed) {

@@ -27,6 +27,7 @@ V-Clip is a spotlight-style clipboard manager for macOS. It listens to clipboard
 - Clipboard history with automatic ordering by most recent copy time.
 - Instant text filtering while typing in the search field.
 - Keyboard navigation with `↑` and `↓`, plus minimal-scroll behavior for a smoother list experience.
+- One-click paste flow: select an item and V-Clip rewrites the clipboard, returns focus, and sends `Cmd + V`.
 - Default global shortcut: `Option + V`.
 - Built with Kotlin Multiplatform and Compose Desktop.
 
@@ -41,6 +42,7 @@ This project is currently focused on the macOS desktop target. The core architec
 | `Option + V` | Open the V-Clip window |
 | `↑` / `↓` | Move selection |
 | `Enter` | Confirm the selected item |
+| Mouse click | Confirm the clicked item and paste it |
 | `Esc` | Close the window |
 
 ## Tech Stack
@@ -73,6 +75,16 @@ composeApp/
 ```bash
 ./gradlew :composeApp:run
 ```
+
+### macOS permission required for auto-paste
+
+V-Clip can automatically paste the selected item back into the previously focused app. For that part to work, macOS must allow the app or IDE process to control your computer through Accessibility.
+
+Grant permission in:
+
+`System Settings -> Privacy & Security -> Accessibility`
+
+If clipboard history works but auto-paste does not, this is the first setting to check.
 
 ### Compile only
 
@@ -108,6 +120,7 @@ V-Clip 是一个面向 macOS 的聚焦式剪贴板管理器。它会监听剪贴
 - 自动记录剪贴板历史，并按最近复制时间排序。
 - 在搜索框输入时可即时过滤文本内容。
 - 支持 `↑` 和 `↓` 键盘导航，并实现了更自然的最小滚动体验。
+- 支持一键上屏：确认条目后会重写剪贴板、切回原应用并自动发送 `Cmd + V`。
 - 默认全局快捷键：`Option + V`。
 - 使用 Kotlin Multiplatform 与 Compose Desktop 构建。
 
@@ -122,6 +135,7 @@ V-Clip 是一个面向 macOS 的聚焦式剪贴板管理器。它会监听剪贴
 | `Option + V` | 打开 V-Clip 窗口 |
 | `↑` / `↓` | 移动选中项 |
 | `Enter` | 确认当前选中项 |
+| 鼠标点击 | 确认被点击条目并自动粘贴 |
 | `Esc` | 关闭窗口 |
 
 ## 技术栈
@@ -154,6 +168,16 @@ composeApp/
 ```bash
 ./gradlew :composeApp:run
 ```
+
+### 自动粘贴所需的 macOS 权限
+
+V-Clip 支持把选中的条目自动粘贴回之前正在输入的应用。要让这部分生效，macOS 需要允许应用或 IDE 进程拥有“辅助功能”权限。
+
+请在这里授权：
+
+`系统设置 -> 隐私与安全性 -> 辅助功能`
+
+如果剪贴板历史正常，但点击或回车后没有自动上屏，第一时间先检查这里。
 
 ### 仅编译
 

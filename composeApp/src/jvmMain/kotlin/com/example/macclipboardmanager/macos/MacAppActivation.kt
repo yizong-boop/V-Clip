@@ -1,8 +1,38 @@
 package com.example.macclipboardmanager.macos
 
+import com.sun.jna.Pointer
+import com.example.macclipboardmanager.macos.foundation.CocoaInterop
 import com.example.macclipboardmanager.macos.objc.ObjcRuntime
 
 internal object MacAppActivation {
+    fun captureFrontmostApplicationProcessId(): Int? =
+        runCatching {
+            CocoaInterop.autoreleasePool {
+                val workspaceClass = ObjcRuntime.getClass("NSWorkspace")
+                val sharedWorkspace = ObjcRuntime.sendPointer(workspaceClass, "sharedWorkspace")
+                val frontmostApp = sharedWorkspace?.let {
+                    ObjcRuntime.sendPointer(it, "frontmostApplication")
+                }
+                frontmostApp?.takeUnless { Pointer.nativeValue(it) == 0L }?.let {
+                    ObjcRuntime.sendInt(it, "processIdentifier")
+                }
+            }
+        }.getOrNull()
+
+    fun reactivateApplication(processId: Int): Boolean =
+        runCatching {
+            CocoaInterop.autoreleasePool {
+                val applicationClass = ObjcRuntime.getClass("NSRunningApplication")
+                val application = ObjcRuntime.sendPointer(
+                    applicationClass,
+                    "runningApplicationWithProcessIdentifier:",
+                    processId,
+                ) ?: return@autoreleasePool false
+
+                ObjcRuntime.sendLong(application, "activateWithOptions:", 1L) != 0L
+            }
+        }.getOrDefault(false)
+
     fun requestForeground() {
         runCatching {
             val applicationClass = ObjcRuntime.getClass("NSApplication")
