@@ -2,6 +2,7 @@ package com.example.macclipboardmanager.macos.hotkey
 
 import com.sun.jna.Callback
 import com.sun.jna.Library
+import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
@@ -42,17 +43,16 @@ internal object CarbonBridge {
 
     fun registerHotkey(hotkey: Hotkey, registrationId: Int): Pointer {
         val outRef = PointerByReference()
-        val hotKeyId = EventHotKeyID().apply {
-            signature = hotkeySignature
-            id = registrationId
-            write()
-        }
+        // On Apple Silicon arm64, JNA cannot reliably pass small structs by value.
+        // EventHotKeyID is 8 bytes (signature:4 + id:4) which on arm64 AAPCS is
+        // passed in a single register. We pack it into a Long to avoid the JNA bug.
+        val packedId = packEventHotKeyId(hotkeySignature, registrationId)
 
         checkStatus(
             carbon.RegisterEventHotKey(
                 hotkey.keyCode,
                 hotkey.modifiers.toCarbonFlags(),
-                hotKeyId,
+                packedId,
                 carbon.GetApplicationEventTarget(),
                 kEventHotKeyNoOptions,
                 outRef,
@@ -71,24 +71,38 @@ internal object CarbonBridge {
     }
 
     fun readHotkeyId(eventRef: Pointer): EventHotKeyID {
-        val hotKeyId = EventHotKeyID()
+        // Read raw 8 bytes directly to avoid JNA Structure alignment issues on arm64
+        val buffer = Memory(8)
         checkStatus(
             carbon.GetEventParameter(
                 eventRef,
                 kEventParamDirectObject,
                 typeEventHotKeyID,
                 null,
-                hotKeyId.size().toLong(),
+                8,
                 null,
-                hotKeyId.pointer,
+                buffer,
             ),
             "Unable to decode Carbon hotkey event payload.",
         )
-        hotKeyId.read()
-        return hotKeyId
+        return unpackEventHotKeyId(buffer.getLong(0))
     }
 
     fun noErr(): Int = 0
+
+    /**
+     * Pack an EventHotKeyID (signature + id) into a single 64-bit Long to work
+     * around JNA's arm64 struct-by-value bug. On arm64 AAPCS a struct ≤ 8 bytes
+     * is loaded into one register; lower 32 bits = first field, upper 32 bits = second.
+     */
+    private fun packEventHotKeyId(signature: Int, id: Int): Long =
+        (id.toLong() shl 32) or (signature.toLong() and 0xFFFFFFFFL)
+
+    private fun unpackEventHotKeyId(packed: Long): EventHotKeyID =
+        EventHotKeyID().apply {
+            signature = (packed and 0xFFFFFFFFL).toInt()
+            id = (packed shr 32).toInt()
+        }
 
     private fun checkStatus(status: Int, message: String) {
         if (status == 0) {
@@ -140,7 +154,7 @@ internal object CarbonBridge {
         fun RegisterEventHotKey(
             inHotKeyCode: Int,
             inHotKeyModifiers: Int,
-            inHotKeyID: EventHotKeyID,
+            inHotKeyID: Long,
             inTarget: Pointer,
             inOptions: Int,
             outRef: PointerByReference,

@@ -33,6 +33,7 @@ import com.example.macclipboardmanager.macos.paste.handleConfirmedSelection
 import com.example.macclipboardmanager.smoke.MacSmokeDemo
 import com.example.macclipboardmanager.ui.ClipboardWindowContent
 import com.example.macclipboardmanager.ui.SpotlightWindowState
+import com.example.macclipboardmanager.macos.objc.ObjcRuntime
 import com.example.macclipboardmanager.ui.formatRelativeTime
 import kotlinx.coroutines.delay
 import java.awt.event.WindowAdapter
@@ -73,6 +74,7 @@ fun main() {
         var isFailureToastWindowVisible by remember { mutableStateOf(false) }
 
         DisposableEffect(Unit) {
+            bootstrapMacApp()
             viewModel.start()
             onDispose {
                 viewModel.close()
@@ -197,7 +199,7 @@ fun main() {
                     if (uiState.filteredItems.isNotEmpty()) {
                         listState.scrollToItem(0)
                     }
-                    repeat(8) {
+                    repeat(8) { attempt ->
                         withFrameNanos { }
                         MacAppActivation.requestForeground()
                         window.isVisible = true
@@ -259,5 +261,31 @@ fun main() {
                 }
             }
         }
+    }
+}
+
+/**
+ * Explicitly initialize the macOS application environment before Compose Desktop starts.
+ *
+ * On macOS 14+ (Sonoma/Sequoia), Carbon event delivery requires the process to be recognized
+ * as a proper application. Without this, RegisterEventHotKey succeeds but events are quietly
+ * dropped by the system. Calling sharedApplication and setting activation policy to Accessory
+ * signals to macOS that this background process should receive app events.
+ */
+private fun bootstrapMacApp() {
+    if (!System.getProperty("os.name").contains("mac", ignoreCase = true)) {
+        return
+    }
+
+    runCatching {
+        val appClass = ObjcRuntime.getClass("NSApplication")
+        val sharedApp = ObjcRuntime.sendPointer(appClass, "sharedApplication")
+        if (sharedApp != null) {
+            // NSApplicationActivationPolicyAccessory = 1
+            // Background app: no Dock icon, but can receive Carbon events
+            ObjcRuntime.sendVoid(sharedApp, "setActivationPolicy:", 1L)
+        }
+    }.onFailure { error ->
+        System.err.println("V-Clip: Failed to bootstrap macOS app environment: ${error.message}")
     }
 }
