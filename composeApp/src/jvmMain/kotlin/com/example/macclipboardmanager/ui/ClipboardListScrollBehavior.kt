@@ -120,7 +120,7 @@ internal fun measureClipboardListItemHeight(
     relativeTimeTextStyle: TextStyle,
 ): Int {
     val outerHorizontalPaddingPx = with(density) { (10.dp * 2).roundToPx() }
-    val innerHorizontalPaddingPx = with(density) { (14.dp * 2).roundToPx() }
+    val innerHorizontalPaddingPx = with(density) { (22.dp + 14.dp).roundToPx() }
     val innerVerticalPaddingPx = with(density) { (12.dp * 2).roundToPx() }
     val spacerWidthPx = with(density) { 12.dp.roundToPx() }
 

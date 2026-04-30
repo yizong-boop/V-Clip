@@ -85,7 +85,7 @@ fun ClipboardWindowContent(
     var listViewportWidthPx by remember { mutableIntStateOf(0) }
     val selectedItemTextStyle = MaterialTheme.typography.bodyLarge.copy(
         color = Color(0xFF111827),
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Normal,
     )
     val windowShape = RoundedCornerShape(28.dp)
     val relativeTimeTextStyle = MaterialTheme.typography.labelMedium.copy(
@@ -309,41 +309,66 @@ private fun ClipboardListItem(
     relativeTime: String,
     onClick: () -> Unit,
 ) {
-    val backgroundColor = if (isSelected) Color(0xFFDED8CB) else Color.Transparent
+    val selectedAccentColor = Color(0xFFCE8381)
+    val backgroundColor = if (isSelected) Color(0xFFF6EBE8) else Color.Transparent
     val interactionSource = remember { MutableInteractionSource() }
+    val density = LocalDensity.current
+    var itemHeightPx by remember { mutableIntStateOf(0) }
+    val indicatorHeight = remember(itemHeightPx, density) {
+        if (itemHeightPx > 0) {
+            with(density) { (itemHeightPx * 0.55f).toDp() }
+        } else {
+            16.dp
+        }
+    }
 
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp)
-            .background(backgroundColor, RoundedCornerShape(20.dp))
+            .onSizeChanged { itemHeightPx = it.height }
+            .background(backgroundColor, RoundedCornerShape(8.dp))
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick,
             )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
     ) {
-        Text(
-            text = item.text,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyLarge.copy(
-                color = Color(0xFF111827),
-                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-            ),
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = relativeTime,
-            style = MaterialTheme.typography.labelMedium.copy(
-                color = Color(0xFF6B7280),
-                fontWeight = FontWeight.Medium,
-            ),
-        )
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .size(width = 6.dp, height = indicatorHeight)
+                    .background(selectedAccentColor, RoundedCornerShape(3.dp)),
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 22.dp, top = 12.dp, end = 14.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                text = item.text,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    color = Color(0xFF111827),
+                    fontWeight = FontWeight.Normal,
+                ),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = relativeTime,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    color = Color(0xFF6B7280),
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
     }
 }
 
