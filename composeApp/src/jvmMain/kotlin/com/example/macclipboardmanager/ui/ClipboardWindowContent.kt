@@ -8,6 +8,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +55,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
@@ -65,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.macclipboardmanager.domain.clipboard.ClipboardItem
 import com.example.macclipboardmanager.feature.main.MainUiState
+import com.example.macclipboardmanager.macos.MacWindowDragging
 
 @Composable
 fun ClipboardWindowContent(
@@ -254,14 +258,27 @@ private fun ClipboardSearchField(
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
     ) {
-        Text(
-            text = "Clipboard",
-            style = TextStyle(
-                color = Color(0xFF6B7280),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-            ),
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(24.dp)
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        MacWindowDragging.performDragWithCurrentEvent()
+                    }
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = "Clipboard",
+                style = TextStyle(
+                    color = Color(0xFF6B7280),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
         Spacer(modifier = Modifier.height(6.dp))
         BasicTextField(
             value = textFieldValue,

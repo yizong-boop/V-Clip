@@ -73,6 +73,9 @@ fun AppRoot(onCloseRequest: () -> Unit) {
         clipboardPasteController = clipboardPasteController,
         spotlightWindowState = spotlightWindowState,
         spotlightController = spotlightController,
+        onPrepareShowWindow = {
+            windowState.position = WindowPosition(Alignment.Center)
+        },
         onAutoPasteFailureVisibleChanged = { isFailureToastWindowVisible = it },
     )
 

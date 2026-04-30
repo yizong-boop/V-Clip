@@ -27,6 +27,7 @@ internal fun SelectionEffectHandler(
     clipboardPasteController: ClipboardPasteController,
     spotlightWindowState: SpotlightWindowState,
     spotlightController: SpotlightWindowController,
+    onPrepareShowWindow: () -> Unit,
     onAutoPasteFailureVisibleChanged: (Boolean) -> Unit,
 ) {
     var previousFrontmostAppProcessId by remember { mutableStateOf<Int?>(null) }
@@ -57,6 +58,7 @@ internal fun SelectionEffectHandler(
                         viewModel.resetSelectionToFirst()
                         previousFrontmostAppProcessId =
                             MacAppActivation.captureFrontmostApplicationProcessId()
+                        onPrepareShowWindow()
                         MacAppActivation.requestForeground()
                         spotlightWindowState.show()
                         spotlightController.prepareShow()
@@ -85,6 +87,7 @@ internal fun SelectionEffectHandler(
                             diagnostics = PrintStreamDiagnostics(),
                             onAutoPasteFailure = {
                                 onAutoPasteFailureVisibleChanged(true)
+                                onPrepareShowWindow()
                                 spotlightWindowState.show()
                                 spotlightController.prepareShow()
                                 MacAppActivation.requestForeground()
