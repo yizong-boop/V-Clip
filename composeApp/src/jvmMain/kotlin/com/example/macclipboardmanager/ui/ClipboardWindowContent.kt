@@ -8,7 +8,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,19 +54,15 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.macclipboardmanager.domain.clipboard.ClipboardItem
 import com.example.macclipboardmanager.feature.main.MainUiState
-import kotlin.math.max
 
 @Composable
 fun ClipboardWindowContent(
@@ -83,7 +78,6 @@ fun ClipboardWindowContent(
     onSelectNext: () -> Unit,
     onSelectItem: (String) -> Unit,
 ) {
-    val selectedIndex = uiState.filteredItems.indexOfFirst { it.id == uiState.selectedItemId }
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
     var listViewportWidthPx by remember { mutableIntStateOf(0) }
@@ -97,60 +91,17 @@ fun ClipboardWindowContent(
         fontWeight = FontWeight.Medium,
     )
 
-    LaunchedEffect(uiState.selectedItemId, uiState.filteredItems, listViewportWidthPx) {
-        if (selectedIndex < 0) {
-            return@LaunchedEffect
-        }
-
-        withFrameNanos { }
-        val layoutInfo = listState.layoutInfo
-        val visibleItems = layoutInfo.visibleItemsInfo
-        if (visibleItems.isEmpty()) {
-            return@LaunchedEffect
-        }
-
-        val initialTargetInfo = visibleItems.firstOrNull { it.index == selectedIndex }
-        val scrollTarget = when {
-            initialTargetInfo != null -> ScrollTarget.Visible
-            selectedIndex < visibleItems.first().index -> ScrollTarget.AlignTop
-            selectedIndex > visibleItems.last().index -> ScrollTarget.AlignBottom
-            else -> return@LaunchedEffect
-        }
-
-        when (scrollTarget) {
-            ScrollTarget.Visible -> {
-                listState.nudgeItemIntoViewport(selectedIndex)
-            }
-
-            ScrollTarget.AlignTop -> {
-                listState.animateScrollToItem(selectedIndex)
-            }
-
-            ScrollTarget.AlignBottom -> {
-                if (listViewportWidthPx <= 0) {
-                    return@LaunchedEffect
-                }
-
-                val selectedItem = uiState.filteredItems[selectedIndex]
-                val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
-                val selectedItemHeight = measureClipboardListItemHeight(
-                    item = selectedItem,
-                    relativeTime = relativeTimeFormatter(selectedItem.copiedAtEpochMillis),
-                    viewportWidthPx = listViewportWidthPx,
-                    textMeasurer = textMeasurer,
-                    density = density,
-                    itemTextStyle = selectedItemTextStyle,
-                    relativeTimeTextStyle = relativeTimeTextStyle,
-                )
-                val desiredTop = (viewportHeight - selectedItemHeight).coerceAtLeast(0)
-
-                listState.animateScrollToItem(
-                    index = selectedIndex,
-                    scrollOffset = -desiredTop,
-                )
-            }
-        }
-    }
+    ClipboardListScrollBehavior(
+        listState = listState,
+        filteredItems = uiState.filteredItems,
+        selectedItemId = uiState.selectedItemId,
+        listViewportWidthPx = listViewportWidthPx,
+        relativeTimeFormatter = relativeTimeFormatter,
+        textMeasurer = textMeasurer,
+        density = density,
+        selectedItemTextStyle = selectedItemTextStyle,
+        relativeTimeTextStyle = relativeTimeTextStyle,
+    )
 
     Surface(
         modifier = Modifier
@@ -210,7 +161,7 @@ fun ClipboardWindowContent(
             Column(
                 verticalArrangement = Arrangement.Top,
             ) {
-                SearchField(
+                ClipboardSearchField(
                     query = uiState.searchQuery,
                     focusRequester = focusRequester,
                     focusRequestKey = focusRequestKey,
@@ -265,93 +216,7 @@ fun ClipboardWindowContent(
 }
 
 @Composable
-private fun ToastBubble(message: String) {
-    Surface(
-        color = Color(0xE6151720),
-        contentColor = Color(0xFFF8FAFC),
-        shape = CircleShape,
-        tonalElevation = 0.dp,
-        shadowElevation = 10.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(
-                        color = Color(0xFFF97316),
-                        shape = CircleShape,
-                    ),
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    color = Color(0xFFF8FAFC),
-                    fontWeight = FontWeight.Medium,
-                ),
-            )
-        }
-    }
-}
-
-private suspend fun LazyListState.nudgeItemIntoViewport(index: Int) {
-    val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
-    val viewportStart = layoutInfo.viewportStartOffset
-    val viewportEnd = layoutInfo.viewportEndOffset
-    val itemTop = targetInfo.offset
-    val itemBottom = targetInfo.offset + targetInfo.size
-
-    when {
-        itemTop < viewportStart -> animateScrollBy((itemTop - viewportStart).toFloat())
-        itemBottom > viewportEnd -> animateScrollBy((itemBottom - viewportEnd).toFloat())
-    }
-}
-
-private enum class ScrollTarget {
-    Visible,
-    AlignTop,
-    AlignBottom,
-}
-
-private fun measureClipboardListItemHeight(
-    item: ClipboardItem,
-    relativeTime: String,
-    viewportWidthPx: Int,
-    textMeasurer: TextMeasurer,
-    density: Density,
-    itemTextStyle: TextStyle,
-    relativeTimeTextStyle: TextStyle,
-): Int {
-    val outerHorizontalPaddingPx = with(density) { (10.dp * 2).roundToPx() }
-    val innerHorizontalPaddingPx = with(density) { (14.dp * 2).roundToPx() }
-    val innerVerticalPaddingPx = with(density) { (12.dp * 2).roundToPx() }
-    val spacerWidthPx = with(density) { 12.dp.roundToPx() }
-
-    val timeLayout = textMeasurer.measure(
-        text = relativeTime,
-        style = relativeTimeTextStyle,
-        maxLines = 1,
-    )
-
-    val contentWidthPx = (viewportWidthPx - outerHorizontalPaddingPx - innerHorizontalPaddingPx).coerceAtLeast(1)
-    val textMaxWidthPx = (contentWidthPx - spacerWidthPx - timeLayout.size.width).coerceAtLeast(1)
-
-    val textLayout = textMeasurer.measure(
-        text = item.text,
-        style = itemTextStyle,
-        maxLines = 3,
-        overflow = TextOverflow.Ellipsis,
-        constraints = Constraints(maxWidth = textMaxWidthPx),
-    )
-
-    return max(textLayout.size.height, timeLayout.size.height) + innerVerticalPaddingPx
-}
-
-@Composable
-private fun SearchField(
+private fun ClipboardSearchField(
     query: String,
     focusRequester: FocusRequester,
     focusRequestKey: Int,
@@ -506,5 +371,38 @@ private fun EmptyClipboardState() {
                 color = Color(0xFF6B7280),
             ),
         )
+    }
+}
+
+@Composable
+private fun ToastBubble(message: String) {
+    Surface(
+        color = Color(0xE6151720),
+        contentColor = Color(0xFFF8FAFC),
+        shape = CircleShape,
+        tonalElevation = 0.dp,
+        shadowElevation = 10.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        color = Color(0xFFF97316),
+                        shape = CircleShape,
+                    ),
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = Color(0xFFF8FAFC),
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
     }
 }

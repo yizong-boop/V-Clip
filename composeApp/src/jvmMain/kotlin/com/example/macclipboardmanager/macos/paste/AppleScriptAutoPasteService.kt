@@ -23,7 +23,8 @@ class AppleScriptAutoPasteService(
                 if (!process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) {
                     process.destroyForcibly()
                     return@withContext AutoPasteResult.Failure(
-                        message = "Auto-paste command timed out.",
+                        message = "Auto-paste command timed out after ${timeoutMillis}ms.",
+                        errorType = AutoPasteResult.ErrorType.TIMEOUT,
                         permissionHint = accessibilityPermissionHint,
                     )
                 }
@@ -32,15 +33,15 @@ class AppleScriptAutoPasteService(
                 if (process.exitValue() == 0) {
                     AutoPasteResult.Success
                 } else {
+                    val isPermissionError = output.requiresPermissionHint()
                     AutoPasteResult.Failure(
-                        message = buildString {
-                            append("Auto-paste command failed")
-                            if (output.isNotBlank()) {
-                                append(": ")
-                                append(output)
-                            }
+                        message = buildErrorMessage(output),
+                        errorType = if (isPermissionError) {
+                            AutoPasteResult.ErrorType.PERMISSION_DENIED
+                        } else {
+                            AutoPasteResult.ErrorType.EXECUTION_ERROR
                         },
-                        permissionHint = if (output.requiresPermissionHint()) {
+                        permissionHint = if (isPermissionError) {
                             accessibilityPermissionHint
                         } else {
                             null
@@ -50,10 +51,19 @@ class AppleScriptAutoPasteService(
             }.getOrElse { throwable ->
                 AutoPasteResult.Failure(
                     message = "Unable to execute osascript for auto-paste: ${throwable.message}",
+                    errorType = AutoPasteResult.ErrorType.UNKNOWN,
                     permissionHint = accessibilityPermissionHint,
                 )
             }
         }
+
+    private fun buildErrorMessage(output: String): String = buildString {
+        append("Auto-paste command failed")
+        if (output.isNotBlank()) {
+            append(": ")
+            append(output)
+        }
+    }
 
     private fun String.requiresPermissionHint(): Boolean {
         val normalized = lowercase(Locale.US)

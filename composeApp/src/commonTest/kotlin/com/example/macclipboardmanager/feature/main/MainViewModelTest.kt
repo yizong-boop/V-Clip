@@ -11,7 +11,6 @@ import com.example.macclipboardmanager.domain.clipboard.ClipboardRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -247,7 +246,7 @@ class MainViewModelTest {
                 globalHotkeyManager = hotkeys,
                 clock = { ++effectClock },
                 toastDurationMillis = toastDurationMillis,
-                coroutineScope = scope,
+                scope = scope,
             )
         }
 

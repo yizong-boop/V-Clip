@@ -1,6 +1,7 @@
 package com.example.macclipboardmanager.macos.paste
 
 import com.example.macclipboardmanager.core.clipboard.ClipboardWriteResult
+import com.example.macclipboardmanager.core.diagnostics.AppDiagnostics
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -39,6 +40,7 @@ class ConfirmSelectionFlowTest {
     fun failedClipboardWriteStillHidesWindowAndSkipsPaste() = runTest {
         val events = mutableListOf<String>()
         val logs = mutableListOf<String>()
+        val diagnostics = FakeDiagnostics(logs)
         val controller = FakeClipboardPasteController(
             onWrite = {
                 events += "write:$it"
@@ -57,7 +59,7 @@ class ConfirmSelectionFlowTest {
             onClearSearchQuery = { events += "clear" },
             onRestorePreviousAppFocus = { events += "restore-focus" },
             delayFn = { events += "delay:$it" },
-            logger = logs::add,
+            diagnostics = diagnostics,
         )
 
         assertEquals(
@@ -73,11 +75,13 @@ class ConfirmSelectionFlowTest {
     @Test
     fun failedAutoPasteLogsPermissionHint() = runTest {
         val logs = mutableListOf<String>()
+        val diagnostics = FakeDiagnostics(logs)
         val controller = FakeClipboardPasteController(
             onWrite = { ClipboardWriteResult.Success(changeCount = 1L) },
             onPaste = {
                 AutoPasteResult.Failure(
                     message = "not allowed",
+                    errorType = AutoPasteResult.ErrorType.PERMISSION_DENIED,
                     permissionHint = "Grant permission",
                 )
             },
@@ -90,7 +94,7 @@ class ConfirmSelectionFlowTest {
             onClearSearchQuery = {},
             onAutoPasteFailure = { logs += "callback:${it.message}" },
             delayFn = {},
-            logger = logs::add,
+            diagnostics = diagnostics,
         )
 
         assertEquals(
@@ -106,5 +110,21 @@ class ConfirmSelectionFlowTest {
         override fun writePlainText(text: String): ClipboardWriteResult = onWrite(text)
 
         override suspend fun pasteToFrontmostApp(): AutoPasteResult = onPaste()
+    }
+
+    private class FakeDiagnostics(
+        private val errors: MutableList<String>,
+    ) : AppDiagnostics {
+        override fun info(message: String) {
+            errors += message
+        }
+
+        override fun warn(message: String) {
+            errors += message
+        }
+
+        override fun error(message: String, throwable: Throwable?) {
+            errors += message
+        }
     }
 }

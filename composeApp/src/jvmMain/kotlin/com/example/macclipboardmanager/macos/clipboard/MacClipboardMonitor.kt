@@ -4,6 +4,7 @@ import com.sun.jna.Pointer
 import com.example.macclipboardmanager.core.clipboard.ClipboardMonitor
 import com.example.macclipboardmanager.core.clipboard.ClipboardTextEvent
 import com.example.macclipboardmanager.core.clipboard.ClipboardWriteResult
+import com.example.macclipboardmanager.core.diagnostics.AppDiagnostics
 import com.example.macclipboardmanager.macos.MacPlatform
 import com.example.macclipboardmanager.macos.foundation.CocoaInterop
 import com.example.macclipboardmanager.macos.objc.ObjcRuntime
@@ -24,6 +25,7 @@ class MacClipboardMonitor(
     private val pollIntervalMillis: Long = 250L,
     dispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
     private val nowEpochMillis: () -> Long = { System.currentTimeMillis() },
+    private val diagnostics: AppDiagnostics? = null,
 ) : ClipboardMonitor {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -129,7 +131,7 @@ class MacClipboardMonitor(
                 ),
             )
         }.onFailure { throwable ->
-            System.err.println("Clipboard polling failed: ${throwable.message}")
+            diagnostics?.error("Clipboard polling failed: ${throwable.message}", throwable)
         }
     }
 

@@ -1,6 +1,7 @@
 package com.example.macclipboardmanager.macos.paste
 
 import com.example.macclipboardmanager.core.clipboard.ClipboardWriteResult
+import com.example.macclipboardmanager.core.diagnostics.AppDiagnostics
 import kotlinx.coroutines.delay
 
 internal suspend fun handleConfirmedSelection(
@@ -12,7 +13,7 @@ internal suspend fun handleConfirmedSelection(
     onAutoPasteFailure: (AutoPasteResult.Failure) -> Unit = {},
     delayMillis: Long = 100L,
     delayFn: suspend (Long) -> Unit = ::delay,
-    logger: (String) -> Unit = { message -> System.err.println(message) },
+    diagnostics: AppDiagnostics? = null,
 ) {
     val writeResult = clipboardPasteController.writePlainText(text)
     onHideWindow()
@@ -26,14 +27,14 @@ internal suspend fun handleConfirmedSelection(
                 AutoPasteResult.Success -> Unit
                 is AutoPasteResult.Failure -> {
                     onAutoPasteFailure(pasteResult)
-                    logger("Auto-paste failed: ${pasteResult.message}")
-                    pasteResult.permissionHint?.let(logger)
+                    diagnostics?.error("Auto-paste failed: ${pasteResult.message}")
+                    pasteResult.permissionHint?.let { diagnostics?.warn(it) }
                 }
             }
         }
 
         is ClipboardWriteResult.Failure -> {
-            logger("Clipboard write failed: ${writeResult.message}")
+            diagnostics?.error("Clipboard write failed: ${writeResult.message}")
         }
     }
 }

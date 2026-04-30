@@ -1,7 +1,5 @@
 package com.example.macclipboardmanager.feature.main
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.example.macclipboardmanager.core.clipboard.ClipboardMonitor
 import com.example.macclipboardmanager.core.hotkey.GlobalHotkeyManager
 import com.example.macclipboardmanager.core.hotkey.Hotkey
@@ -9,11 +7,11 @@ import com.example.macclipboardmanager.core.hotkey.HotkeyModifier
 import com.example.macclipboardmanager.domain.clipboard.ClipboardItem
 import com.example.macclipboardmanager.domain.clipboard.ClipboardRepository
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -31,15 +29,16 @@ class MainViewModel(
     private val defaultHotkey: Hotkey = DEFAULT_HOTKEY,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val toastDurationMillis: Long = 3_000L,
-    coroutineScope: CoroutineScope? = null,
-) : ViewModel(coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Default)) {
+    scope: CoroutineScope? = null,
+) {
+    private val effectiveScope: CoroutineScope = scope ?: CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val ownsScope = scope == null
 
     private val mutableUiState = MutableStateFlow(MainUiState())
     private val mutableEffects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
     private val searchQuery = MutableStateFlow("")
-    private val ownsCoroutineScope = coroutineScope == null
     private val workerScope = CoroutineScope(
-        viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]),
+        effectiveScope.coroutineContext + SupervisorJob(effectiveScope.coroutineContext[Job]),
     )
 
     private var started = false
@@ -55,9 +54,7 @@ class MainViewModel(
                 buildState(items = items, searchQuery = query)
             }.collect { state ->
                 mutableUiState.update { currentState ->
-                    state.copy(
-                        toastMessage = currentState.toastMessage,
-                    )
+                    state.copy(toastMessage = currentState.toastMessage)
                 }
             }
         }
@@ -123,6 +120,7 @@ class MainViewModel(
 
     fun confirmSelection() {
         val selectedText = mutableUiState.value.selectedItem?.text ?: return
+        repository.bumpSelectedItem(selectedText)
         mutableEffects.tryEmit(
             MainEffect.ConfirmSelection(
                 text = selectedText,
@@ -147,10 +145,6 @@ class MainViewModel(
     }
 
     fun close() {
-        cleanup()
-    }
-
-    override fun onCleared() {
         cleanup()
     }
 
@@ -218,8 +212,8 @@ class MainViewModel(
         globalHotkeyManager.close()
         clearToastJob?.cancel()
         workerScope.cancel()
-        if (ownsCoroutineScope) {
-            viewModelScope.cancel()
+        if (ownsScope) {
+            effectiveScope.cancel()
         }
     }
 
