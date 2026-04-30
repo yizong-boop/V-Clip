@@ -44,6 +44,7 @@ class MainViewModel(
     private var started = false
     private var cleanedUp = false
     private var clearToastJob: Job? = null
+    private var confirmSelectionInProgress = false
 
     val uiState: StateFlow<MainUiState> = mutableUiState.asStateFlow()
     val effects: SharedFlow<MainEffect> = mutableEffects.asSharedFlow()
@@ -119,13 +120,25 @@ class MainViewModel(
     }
 
     fun confirmSelection() {
+        if (confirmSelectionInProgress) {
+            return
+        }
+
         val selectedText = mutableUiState.value.selectedItem?.text ?: return
+        confirmSelectionInProgress = true
         repository.bumpSelectedItem(selectedText)
-        mutableEffects.tryEmit(
+        val emitted = mutableEffects.tryEmit(
             MainEffect.ConfirmSelection(
                 text = selectedText,
             ),
         )
+        if (!emitted) {
+            confirmSelectionInProgress = false
+        }
+    }
+
+    fun completeConfirmSelection() {
+        confirmSelectionInProgress = false
     }
 
     fun showToast(message: String) {
@@ -211,6 +224,7 @@ class MainViewModel(
         clipboardMonitor.close()
         globalHotkeyManager.close()
         clearToastJob?.cancel()
+        confirmSelectionInProgress = false
         workerScope.cancel()
         if (ownsScope) {
             effectiveScope.cancel()

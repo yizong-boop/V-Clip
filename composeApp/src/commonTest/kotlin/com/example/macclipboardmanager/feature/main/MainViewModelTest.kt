@@ -11,6 +11,7 @@ import com.example.macclipboardmanager.domain.clipboard.ClipboardRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -156,6 +157,44 @@ class MainViewModelTest {
             MainEffect.ConfirmSelection(text = "hello"),
             effect.await(),
         )
+        viewModel.close()
+    }
+
+    @Test
+    fun confirmSelectionIgnoresRepeatedRequestsUntilCompleted() = runTest {
+        val repository = testRepository()
+        repository.add("hello")
+        val viewModel = createViewModel(repository = repository, scope = this)
+        val effects = mutableListOf<MainEffect>()
+        val collector = backgroundScope.launch {
+            viewModel.effects.collect {
+                effects += it
+            }
+        }
+
+        advanceUntilIdle()
+        viewModel.confirmSelection()
+        viewModel.confirmSelection()
+        runCurrent()
+
+        assertEquals<List<MainEffect>>(
+            listOf(MainEffect.ConfirmSelection(text = "hello")),
+            effects,
+        )
+
+        viewModel.completeConfirmSelection()
+        viewModel.confirmSelection()
+        runCurrent()
+
+        assertEquals<List<MainEffect>>(
+            listOf(
+                MainEffect.ConfirmSelection(text = "hello"),
+                MainEffect.ConfirmSelection(text = "hello"),
+            ),
+            effects,
+        )
+
+        collector.cancel()
         viewModel.close()
     }
 

@@ -64,34 +64,38 @@ internal fun SelectionEffectHandler(
                 }
 
                 is MainEffect.ConfirmSelection -> {
-                    handleConfirmedSelection(
-                        text = effect.text,
-                        clipboardPasteController = clipboardPasteController,
-                        onHideWindow = { spotlightWindowState.hide() },
-                        onClearSearchQuery = viewModel::clearSearchQuery,
-                        onRestorePreviousAppFocus = {
-                            val processId = previousFrontmostAppProcessId
-                            if (processId == null ||
-                                !MacAppActivation.reactivateApplication(processId)
-                            ) {
-                                System.err.println(
-                                    "Unable to reactivate the previously focused " +
-                                        "application before auto-paste.",
+                    try {
+                        handleConfirmedSelection(
+                            text = effect.text,
+                            clipboardPasteController = clipboardPasteController,
+                            onHideWindow = { spotlightWindowState.hide() },
+                            onClearSearchQuery = viewModel::clearSearchQuery,
+                            onRestorePreviousAppFocus = {
+                                val processId = previousFrontmostAppProcessId
+                                if (processId == null ||
+                                    !MacAppActivation.reactivateApplication(processId)
+                                ) {
+                                    System.err.println(
+                                        "Unable to reactivate the previously focused " +
+                                            "application before auto-paste.",
+                                    )
+                                }
+                                previousFrontmostAppProcessId = null
+                            },
+                            diagnostics = PrintStreamDiagnostics(),
+                            onAutoPasteFailure = {
+                                onAutoPasteFailureVisibleChanged(true)
+                                spotlightWindowState.show()
+                                spotlightController.prepareShow()
+                                MacAppActivation.requestForeground()
+                                viewModel.showToast(
+                                    "粘贴失败：请在系统设置 -> 隐私与安全性 中开启辅助功能权限",
                                 )
-                            }
-                            previousFrontmostAppProcessId = null
-                        },
-                        diagnostics = PrintStreamDiagnostics(),
-                        onAutoPasteFailure = {
-                            onAutoPasteFailureVisibleChanged(true)
-                            spotlightWindowState.show()
-                            spotlightController.prepareShow()
-                            MacAppActivation.requestForeground()
-                            viewModel.showToast(
-                                "粘贴失败：请在系统设置 -> 隐私与安全性 中开启辅助功能权限",
-                            )
-                        },
-                    )
+                            },
+                        )
+                    } finally {
+                        viewModel.completeConfirmSelection()
+                    }
                 }
             }
         }
