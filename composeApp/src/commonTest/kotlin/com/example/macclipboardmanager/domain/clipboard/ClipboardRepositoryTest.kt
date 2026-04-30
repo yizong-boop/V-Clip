@@ -1,5 +1,9 @@
 package com.example.macclipboardmanager.domain.clipboard
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -49,12 +53,42 @@ class ClipboardRepositoryTest {
         assertEquals(emptyList(), repository.items.value)
     }
 
-    private fun testRepository(): ClipboardRepository {
+    @Test
+    fun flushSavesCurrentItemsToStore() = runTest {
+        val store = FakeClipboardStore()
+        val repository = testRepository(store = store, persistenceScope = this)
+
+        repository.add("first")
+        repository.add("second")
+        repository.flush()
+
+        assertEquals(listOf("second", "first"), store.lastSavedItems.map(ClipboardItem::text))
+    }
+
+    private fun testRepository(
+        store: ClipboardStore? = null,
+        persistenceScope: CoroutineScope? = null,
+    ): ClipboardRepository {
         var currentTime = 0L
         var nextId = 0
         return ClipboardRepository(
             clock = { ++currentTime },
             idGeneratorOverride = { "id-${nextId++}" },
+            store = store,
+            persistenceScope = persistenceScope ?: CoroutineScope(
+                SupervisorJob() + Dispatchers.Default,
+            ),
         )
+    }
+
+    private class FakeClipboardStore : ClipboardStore {
+        var lastSavedItems: List<ClipboardItem> = emptyList()
+            private set
+
+        override suspend fun save(items: List<ClipboardItem>) {
+            lastSavedItems = items
+        }
+
+        override suspend fun load(): List<ClipboardItem> = emptyList()
     }
 }

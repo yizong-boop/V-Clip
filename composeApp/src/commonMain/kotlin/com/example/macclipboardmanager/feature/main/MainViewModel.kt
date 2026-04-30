@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class MainViewModel(
     private val repository: ClipboardRepository,
@@ -71,6 +72,7 @@ class MainViewModel(
         globalHotkeyManager.register(defaultHotkey)
 
         workerScope.launch {
+            repository.loadFromStore()
             clipboardMonitor.events.collect { event ->
                 repository.add(event.text)
             }
@@ -228,6 +230,9 @@ class MainViewModel(
         workerScope.cancel()
         if (ownsScope) {
             effectiveScope.cancel()
+        }
+        runBlocking {
+            repository.flush()
         }
     }
 

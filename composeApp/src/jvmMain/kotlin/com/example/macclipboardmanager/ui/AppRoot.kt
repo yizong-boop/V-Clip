@@ -30,6 +30,7 @@ import com.example.macclipboardmanager.feature.main.MainViewModel
 import com.example.macclipboardmanager.macos.MacAppActivation
 import com.example.macclipboardmanager.macos.createClipboardMonitor
 import com.example.macclipboardmanager.macos.createClipboardPasteController
+import com.example.macclipboardmanager.macos.createClipboardStore
 import com.example.macclipboardmanager.macos.createGlobalHotkeyManager
 import com.example.macclipboardmanager.macos.paste.ClipboardPasteController
 import kotlinx.coroutines.delay
@@ -44,7 +45,7 @@ import java.awt.event.WindowEvent
  */
 @Composable
 fun AppRoot(onCloseRequest: () -> Unit) {
-    val repository = remember { ClipboardRepository() }
+    val repository = remember { ClipboardRepository(store = createClipboardStore()) }
     val clipboardMonitor = remember { createClipboardMonitor() }
     val clipboardPasteController = remember { createClipboardPasteController(clipboardMonitor) }
     val hotkeyManager = remember { createGlobalHotkeyManager() }

@@ -100,6 +100,17 @@ class ClipboardRepository(
         persistIfNeeded(emptyList())
     }
 
+    suspend fun flush() {
+        val currentStore = store ?: return
+        saveMutex.withLock {
+            @Suppress("TooGenericExceptionCaught")
+            try {
+                currentStore.save(mutableItems.value)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     suspend fun loadFromStore() {
         val stored = store?.load() ?: return
         if (stored.isEmpty()) return
