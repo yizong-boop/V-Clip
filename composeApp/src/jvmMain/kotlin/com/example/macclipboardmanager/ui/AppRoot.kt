@@ -166,6 +166,21 @@ private fun FrameWindowScope.AppRootWindowContent(
         }
     }
 
+    LaunchedEffect(spotlightController.deferredBlurHideRequestKey) {
+        if (spotlightController.deferredBlurHideRequestKey > 0) {
+            val delayMillis =
+                spotlightController.deferredBlurHideAtEpochMillis - System.currentTimeMillis()
+            if (delayMillis > 0L) {
+                delay(delayMillis)
+            }
+            if (spotlightWindowState.isVisible &&
+                spotlightController.shouldHideDeferredBlur(System.currentTimeMillis())
+            ) {
+                hideWindowContent()
+            }
+        }
+    }
+
     // Show → focus retry burst
     LaunchedEffect(spotlightWindowState.isVisible) {
         if (spotlightWindowState.isVisible) {

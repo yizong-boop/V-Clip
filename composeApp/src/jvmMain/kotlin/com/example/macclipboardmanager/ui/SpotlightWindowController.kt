@@ -23,26 +23,41 @@ class SpotlightWindowController(
     var ignoreBlurBeforeEpochMillis by mutableStateOf(0L)
         private set
 
+    var deferredBlurHideAtEpochMillis by mutableStateOf(0L)
+        private set
+
+    var deferredBlurHideRequestKey by mutableIntStateOf(0)
+        private set
+
     var pendingSearchFieldFocus by mutableStateOf(false)
         private set
 
     var focusRequestKey by mutableIntStateOf(initialFocusRequestKey)
         private set
 
+    private var hasDeferredBlurHide by mutableStateOf(false)
+
     fun prepareShow(ignoreBlurWindowMs: Long = 1_200L) {
         isWindowFocused = false
         ignoreBlurBeforeEpochMillis = clock() + ignoreBlurWindowMs
+        deferredBlurHideAtEpochMillis = 0L
+        hasDeferredBlurHide = false
         pendingSearchFieldFocus = true
     }
 
     fun onShowComplete() {
         isWindowFocused = false
         ignoreBlurBeforeEpochMillis = 0L
+        deferredBlurHideAtEpochMillis = 0L
+        hasDeferredBlurHide = false
         pendingSearchFieldFocus = false
     }
 
     fun onWindowGainedFocus() {
         isWindowFocused = true
+        ignoreBlurBeforeEpochMillis = 0L
+        deferredBlurHideAtEpochMillis = 0L
+        hasDeferredBlurHide = false
     }
 
     fun onWindowLostFocus() {
@@ -61,6 +76,20 @@ class SpotlightWindowController(
         pendingSearchFieldFocus = false
     }
 
-    fun shouldHideOnBlur(nowEpochMillis: Long): Boolean =
-        nowEpochMillis >= ignoreBlurBeforeEpochMillis
+    fun shouldHideOnBlur(nowEpochMillis: Long): Boolean {
+        if (nowEpochMillis >= ignoreBlurBeforeEpochMillis) {
+            return true
+        }
+
+        hasDeferredBlurHide = true
+        deferredBlurHideAtEpochMillis = ignoreBlurBeforeEpochMillis
+        deferredBlurHideRequestKey += 1
+        return false
+    }
+
+    fun shouldHideDeferredBlur(nowEpochMillis: Long): Boolean =
+        hasDeferredBlurHide &&
+            !isWindowFocused &&
+            deferredBlurHideAtEpochMillis > 0L &&
+            nowEpochMillis >= deferredBlurHideAtEpochMillis
 }
