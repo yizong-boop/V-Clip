@@ -97,6 +97,12 @@ class MainViewModel(
         searchQuery.value = ""
     }
 
+    fun resetSelectionToFirst() {
+        mutableUiState.update { currentState ->
+            currentState.copy(selectedItemId = currentState.filteredItems.firstOrNull()?.id)
+        }
+    }
+
     fun selectItem(itemId: String) {
         mutableUiState.update { currentState ->
             if (currentState.filteredItems.none { it.id == itemId }) {

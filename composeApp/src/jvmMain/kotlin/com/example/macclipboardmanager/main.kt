@@ -85,16 +85,27 @@ fun main() {
             viewModel.effects.collect { effect ->
                 when (effect) {
                     is MainEffect.ShowWindow -> {
-                        viewModel.clearToast()
-                        isFailureToastWindowVisible = false
-                        viewModel.clearSearchQuery()
-                        previousFrontmostAppProcessId = MacAppActivation.captureFrontmostApplicationProcessId()
-                        MacAppActivation.requestForeground()
-                        spotlightWindowState.show()
-                        pendingSearchFieldFocus = true
+                        if (spotlightWindowState.isVisible) {
+                            spotlightWindowState.hide()
+                            viewModel.clearSearchQuery()
+                            viewModel.clearToast()
+                            isFailureToastWindowVisible = false
+                            isWindowFocused = false
+                            pendingSearchFieldFocus = false
+                        } else {
+                            viewModel.clearToast()
+                            isFailureToastWindowVisible = false
+                            viewModel.clearSearchQuery()
+                            viewModel.resetSelectionToFirst()
+                            previousFrontmostAppProcessId = MacAppActivation.captureFrontmostApplicationProcessId()
+                            MacAppActivation.requestForeground()
+                            spotlightWindowState.show()
+                            pendingSearchFieldFocus = true
+                        }
                     }
 
                     is MainEffect.ConfirmSelection -> {
+                        repository.bumpSelectedItem(effect.text)
                         handleConfirmedSelection(
                             text = effect.text,
                             clipboardPasteController = clipboardPasteController,
@@ -170,7 +181,6 @@ fun main() {
                 val windowListener = object : WindowAdapter() {
                     override fun windowGainedFocus(event: WindowEvent?) {
                         isWindowFocused = true
-                        requestSearchFieldFocusIfNeeded()
                     }
 
                     override fun windowLostFocus(event: WindowEvent?) {
@@ -195,28 +205,41 @@ fun main() {
             LaunchedEffect(spotlightWindowState.isVisible) {
                 if (spotlightWindowState.isVisible) {
                     isWindowFocused = false
-                    ignoreBlurBeforeEpochMillis = System.currentTimeMillis() + 350L
+                    ignoreBlurBeforeEpochMillis = System.currentTimeMillis() + 1_200L
                     if (uiState.filteredItems.isNotEmpty()) {
                         listState.scrollToItem(0)
                     }
-                    repeat(8) { attempt ->
+
+                    MacAppActivation.requestForeground()
+                    window.isVisible = true
+                    window.focusableWindowState = true
+                    window.toFront()
+                    window.requestFocus()
+                    window.requestFocusInWindow()
+                    window.rootPane.requestFocusInWindow()
+
+                    // Burst: immediate focus requests every frame
+                    repeat(12) {
                         withFrameNanos { }
-                        MacAppActivation.requestForeground()
-                        window.isVisible = true
-                        window.focusableWindowState = true
-                        window.toFront()
-                        window.requestFocus()
-                        window.requestFocusInWindow()
-                        window.rootPane.requestFocusInWindow()
-                        delay(45L)
-                        if (isWindowFocused || window.isFocused) {
-                            requestSearchFieldFocusIfNeeded()
-                            return@LaunchedEffect
-                        }
+                        focusRequestKey += 1
+                        pendingSearchFieldFocus = false
+                        delay(16L)
                     }
+                    // Delayed retries for late macOS focus grant
+                    delay(80L)
+                    focusRequestKey += 1
+                    delay(160L)
+                    focusRequestKey += 1
                 } else {
                     isWindowFocused = false
                     ignoreBlurBeforeEpochMillis = 0L
+                }
+            }
+
+            LaunchedEffect(isWindowFocused) {
+                if (isWindowFocused && spotlightWindowState.isVisible) {
+                    focusRequestKey += 1
+                    pendingSearchFieldFocus = false
                 }
             }
 

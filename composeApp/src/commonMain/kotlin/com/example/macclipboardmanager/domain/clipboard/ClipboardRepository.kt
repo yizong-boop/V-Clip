@@ -55,6 +55,24 @@ class ClipboardRepository(
         }
     }
 
+    fun bumpSelectedItem(text: String) {
+        mutableItems.update { currentItems ->
+            val index = currentItems.indexOfFirst { it.text == text }
+            if (index <= 0) return@update currentItems
+
+            val item = currentItems[index]
+            buildList(currentItems.size) {
+                add(currentItems[0])
+                add(item.copy(copiedAtEpochMillis = clock()))
+                for (i in 1 until currentItems.size) {
+                    if (i != index) {
+                        add(currentItems[i])
+                    }
+                }
+            }
+        }
+    }
+
     fun clear() {
         mutableItems.value = emptyList()
     }
