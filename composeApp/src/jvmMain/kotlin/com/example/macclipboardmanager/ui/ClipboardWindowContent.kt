@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,8 +50,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -65,13 +70,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.FrameWindowScope
 import com.example.macclipboardmanager.domain.clipboard.ClipboardItem
 import com.example.macclipboardmanager.feature.main.MainUiState
-import com.example.macclipboardmanager.macos.MacWindowDragging
+import java.awt.MouseInfo
+import java.awt.Point
+import java.awt.Window
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.awt.event.MouseMotionAdapter
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
 
 @Composable
-fun ClipboardWindowContent(
+fun FrameWindowScope.ClipboardWindowContent(
     uiState: MainUiState,
     focusRequester: FocusRequester,
     focusRequestKey: Int,
@@ -83,6 +99,9 @@ fun ClipboardWindowContent(
     onSelectPrevious: () -> Unit,
     onSelectNext: () -> Unit,
     onSelectItem: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit,
+    onTogglePinned: (String) -> Unit,
+    onToggleFavoritesOnly: () -> Unit,
 ) {
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -169,9 +188,11 @@ fun ClipboardWindowContent(
             ) {
                 ClipboardSearchField(
                     query = uiState.searchQuery,
+                    favoritesOnly = uiState.favoritesOnly,
                     focusRequester = focusRequester,
                     focusRequestKey = focusRequestKey,
                     onValueChange = onSearchQueryChange,
+                    onToggleFavoritesOnly = onToggleFavoritesOnly,
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
@@ -199,6 +220,8 @@ fun ClipboardWindowContent(
                                     onSelectItem(item.id)
                                     onConfirmSelection()
                                 },
+                                onToggleFavorite = { onToggleFavorite(item.id) },
+                                onTogglePinned = { onTogglePinned(item.id) },
                             )
                         }
                     }
@@ -222,11 +245,13 @@ fun ClipboardWindowContent(
 }
 
 @Composable
-private fun ClipboardSearchField(
+private fun FrameWindowScope.ClipboardSearchField(
     query: String,
+    favoritesOnly: Boolean,
     focusRequester: FocusRequester,
     focusRequestKey: Int,
     onValueChange: (String) -> Unit,
+    onToggleFavoritesOnly: () -> Unit,
 ) {
     var textFieldValue by remember {
         mutableStateOf(
@@ -258,25 +283,25 @@ private fun ClipboardSearchField(
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(24.dp)
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        MacWindowDragging.performDragWithCurrentEvent()
-                    }
-                },
-            contentAlignment = Alignment.CenterStart,
+                .height(24.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "Clipboard",
-                style = TextStyle(
-                    color = Color(0xFF6B7280),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                ),
+            SmoothWindowDragArea(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(24.dp),
+            ) {
+                ClipboardTitle()
+            }
+            ClipboardActionButton(
+                type = ClipboardActionType.Favorite,
+                isActive = favoritesOnly,
+                isVisible = true,
+                activeColor = Color(0xFFE6B84A),
+                onClick = onToggleFavoritesOnly,
             )
         }
         Spacer(modifier = Modifier.height(6.dp))
@@ -320,17 +345,115 @@ private fun ClipboardSearchField(
 }
 
 @Composable
+private fun FrameWindowScope.SmoothWindowDragArea(
+    modifier: Modifier,
+    content: @Composable () -> Unit,
+) {
+    val dragHandler = remember(window) { SmoothWindowDragHandler(window) }
+
+    DisposableEffect(dragHandler) {
+        onDispose {
+            dragHandler.dispose()
+        }
+    }
+
+    Box(
+        modifier = modifier.pointerInput(dragHandler) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                dragHandler.onDragStarted()
+            }
+        },
+    ) {
+        content()
+    }
+}
+
+private class SmoothWindowDragHandler(
+    private val window: Window,
+) {
+    private var windowLocationAtDragStart: IntOffset? = null
+    private var dragStartPoint: IntOffset? = null
+
+    private val dragListener = object : MouseMotionAdapter() {
+        override fun mouseDragged(event: MouseEvent) {
+            onDrag(event)
+        }
+    }
+
+    private val releaseListener = object : MouseAdapter() {
+        override fun mouseReleased(event: MouseEvent) {
+            stopDrag()
+        }
+    }
+
+    fun onDragStarted() {
+        stopDrag()
+        dragStartPoint = MouseInfo.getPointerInfo()?.location?.toComposeOffset() ?: return
+        windowLocationAtDragStart = window.location.toComposeOffset()
+        window.addMouseListener(releaseListener)
+        window.addMouseMotionListener(dragListener)
+    }
+
+    private fun onDrag(event: MouseEvent) {
+        val startLocation = windowLocationAtDragStart ?: return
+        val startPoint = dragStartPoint ?: return
+        val currentPoint = runCatching {
+            event.locationOnScreen.toComposeOffset()
+        }.getOrElse {
+            MouseInfo.getPointerInfo()?.location?.toComposeOffset() ?: return
+        }
+        val newLocation = startLocation + (currentPoint - startPoint)
+        window.setLocation(newLocation.x, newLocation.y)
+    }
+
+    private fun stopDrag() {
+        window.removeMouseMotionListener(dragListener)
+        window.removeMouseListener(releaseListener)
+        windowLocationAtDragStart = null
+        dragStartPoint = null
+    }
+
+    fun dispose() {
+        stopDrag()
+    }
+}
+
+private fun Point.toComposeOffset(): IntOffset = IntOffset(x = x, y = y)
+
+@Composable
+private fun ClipboardTitle() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            text = "Clipboard",
+            modifier = Modifier.fillMaxWidth(),
+            style = TextStyle(
+                color = Color(0xFF6B7280),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+            ),
+        )
+    }
+}
+
+@Composable
 private fun ClipboardListItem(
     item: ClipboardItem,
     isSelected: Boolean,
     relativeTime: String,
     onClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onTogglePinned: () -> Unit,
 ) {
     val selectedAccentColor = Color(0xFFCE8381)
     val backgroundColor = if (isSelected) Color(0xFFF6EBE8) else Color.Transparent
     val interactionSource = remember { MutableInteractionSource() }
     val density = LocalDensity.current
     var itemHeightPx by remember { mutableIntStateOf(0) }
+    val showActions = isSelected || item.isFavorite || item.isPinned
     val indicatorHeight = remember(itemHeightPx, density) {
         if (itemHeightPx > 0) {
             with(density) { (itemHeightPx * 0.55f).toDp() }
@@ -378,14 +501,162 @@ private fun ClipboardListItem(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = relativeTime,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    color = Color(0xFF6B7280),
-                    fontWeight = FontWeight.Medium,
-                ),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Text(
+                    text = relativeTime,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = Color(0xFF6B7280),
+                        fontWeight = FontWeight.Medium,
+                    ),
+                )
+                if (showActions) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    ClipboardActionButton(
+                        type = ClipboardActionType.Favorite,
+                        isActive = item.isFavorite,
+                        isVisible = true,
+                        activeColor = Color(0xFFE6B84A),
+                        onClick = onToggleFavorite,
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    ClipboardActionButton(
+                        type = ClipboardActionType.Pin,
+                        isActive = item.isPinned,
+                        isVisible = true,
+                        activeColor = selectedAccentColor,
+                        onClick = onTogglePinned,
+                    )
+                }
+            }
         }
+    }
+}
+
+private enum class ClipboardActionType {
+    Favorite,
+    Pin,
+}
+
+@Composable
+private fun ClipboardActionButton(
+    type: ClipboardActionType,
+    isActive: Boolean,
+    isVisible: Boolean,
+    activeColor: Color,
+    onClick: () -> Unit,
+) {
+    if (!isVisible) {
+        Spacer(modifier = Modifier.size(26.dp))
+        return
+    }
+
+    val iconColor = if (isActive) activeColor else Color(0xFFB8B4AC)
+    val backgroundColor = if (isActive) iconColor.copy(alpha = 0.14f) else Color.Transparent
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Box(
+        modifier = Modifier
+            .size(26.dp)
+            .background(backgroundColor, CircleShape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(15.dp)) {
+            when (type) {
+                ClipboardActionType.Favorite -> drawStarIcon(
+                    color = iconColor,
+                    filled = isActive,
+                )
+
+                ClipboardActionType.Pin -> drawPinIcon(
+                    color = iconColor,
+                    filled = isActive,
+                )
+            }
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStarIcon(
+    color: Color,
+    filled: Boolean,
+) {
+    val centerX = size.width / 2f
+    val centerY = size.height / 2f
+    val outerRadius = min(size.width, size.height) * 0.46f
+    val innerRadius = outerRadius * 0.44f
+    val path = Path()
+
+    repeat(10) { index ->
+        val angle = -PI / 2.0 + index * PI / 5.0
+        val radius = if (index % 2 == 0) outerRadius else innerRadius
+        val x = centerX + cos(angle).toFloat() * radius
+        val y = centerY + sin(angle).toFloat() * radius
+        if (index == 0) {
+            path.moveTo(x, y)
+        } else {
+            path.lineTo(x, y)
+        }
+    }
+    path.close()
+
+    if (filled) {
+        drawPath(path = path, color = color)
+    } else {
+        drawPath(path = path, color = color, style = Stroke(width = 1.6.dp.toPx()))
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPinIcon(
+    color: Color,
+    filled: Boolean,
+) {
+    val strokeWidth = 1.7.dp.toPx()
+    val headRadius = min(size.width, size.height) * 0.24f
+    val centerX = size.width / 2f
+    val headCenterY = size.height * 0.30f
+    val tipY = size.height * 0.90f
+
+    if (filled) {
+        drawCircle(color = color, radius = headRadius, center = Offset(centerX, headCenterY))
+        drawLine(
+            color = color,
+            start = Offset(centerX, headCenterY + headRadius * 0.6f),
+            end = Offset(centerX, tipY),
+            strokeWidth = strokeWidth,
+        )
+        drawLine(
+            color = color,
+            start = Offset(centerX - headRadius * 1.35f, size.height * 0.52f),
+            end = Offset(centerX + headRadius * 1.35f, size.height * 0.52f),
+            strokeWidth = strokeWidth,
+        )
+    } else {
+        drawCircle(
+            color = color,
+            radius = headRadius,
+            center = Offset(centerX, headCenterY),
+            style = Stroke(width = strokeWidth),
+        )
+        drawLine(
+            color = color,
+            start = Offset(centerX, headCenterY + headRadius),
+            end = Offset(centerX, tipY),
+            strokeWidth = strokeWidth,
+        )
+        drawLine(
+            color = color,
+            start = Offset(centerX - headRadius * 1.35f, size.height * 0.52f),
+            end = Offset(centerX + headRadius * 1.35f, size.height * 0.52f),
+            strokeWidth = strokeWidth,
+        )
     }
 }
 

@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
@@ -34,8 +35,15 @@ import com.example.macclipboardmanager.macos.createClipboardStore
 import com.example.macclipboardmanager.macos.createGlobalHotkeyManager
 import com.example.macclipboardmanager.macos.paste.ClipboardPasteController
 import kotlinx.coroutines.delay
+import java.awt.GraphicsEnvironment
+import java.awt.Point
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import java.awt.Window as AwtWindow
+import kotlin.math.roundToInt
+
+private val SpotlightWindowWidth = 640.dp
+private val SpotlightWindowHeight = 540.dp
 
 /**
  * Root composable for the V-Clip desktop application.
@@ -57,8 +65,8 @@ fun AppRoot(onCloseRequest: () -> Unit) {
         )
     }
     val windowState = rememberWindowState(
-        width = 640.dp,
-        height = 540.dp,
+        width = SpotlightWindowWidth,
+        height = SpotlightWindowHeight,
         position = WindowPosition(Alignment.Center),
     )
     val spotlightWindowState = remember { SpotlightWindowState() }
@@ -76,6 +84,7 @@ fun AppRoot(onCloseRequest: () -> Unit) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val uiState by viewModel.uiState.collectAsState()
     var isFailureToastWindowVisible by remember { mutableStateOf(false) }
+    var awtWindow by remember { mutableStateOf<AwtWindow?>(null) }
 
     SelectionEffectHandler(
         viewModel = viewModel,
@@ -84,7 +93,11 @@ fun AppRoot(onCloseRequest: () -> Unit) {
         spotlightController = spotlightController,
         previousApplicationFocusController = previousApplicationFocusController,
         onPrepareShowWindow = {
-            windowState.position = WindowPosition(Alignment.Center)
+            val centeredLocation = windowState.centerOnDefaultScreen(
+                width = SpotlightWindowWidth,
+                height = SpotlightWindowHeight,
+            )
+            awtWindow?.setLocation(centeredLocation)
         },
         onAutoPasteFailureVisibleChanged = { isFailureToastWindowVisible = it },
     )
@@ -117,9 +130,11 @@ fun AppRoot(onCloseRequest: () -> Unit) {
             previousApplicationFocusController = previousApplicationFocusController,
             listState = listState,
             viewModel = viewModel,
+            windowState = windowState,
             spotlightWindowState = spotlightWindowState,
             isFailureToastWindowVisible = isFailureToastWindowVisible,
             onFailureToastVisibleChanged = { isFailureToastWindowVisible = it },
+            onWindowAvailable = { awtWindow = it },
         )
     }
 }
@@ -136,9 +151,11 @@ private fun FrameWindowScope.AppRootWindowContent(
     previousApplicationFocusController: PreviousApplicationFocusController,
     listState: LazyListState,
     viewModel: MainViewModel,
+    windowState: WindowState,
     spotlightWindowState: SpotlightWindowState,
     isFailureToastWindowVisible: Boolean,
     onFailureToastVisibleChanged: (Boolean) -> Unit,
+    onWindowAvailable: (AwtWindow) -> Unit,
 ) {
     val backgroundClickInteraction = remember { MutableInteractionSource() }
 
@@ -154,6 +171,8 @@ private fun FrameWindowScope.AppRootWindowContent(
     }
 
     DisposableEffect(window) {
+        onWindowAvailable(window)
+
         fun handleBlur() {
             val now = System.currentTimeMillis()
             if (spotlightWindowState.isVisible && spotlightController.shouldHideOnBlur(now)) {
@@ -207,6 +226,11 @@ private fun FrameWindowScope.AppRootWindowContent(
                 listState.scrollToItem(0)
             }
 
+            val centeredLocation = windowState.centerOnDefaultScreen(
+                width = SpotlightWindowWidth,
+                height = SpotlightWindowHeight,
+            )
+            window.setLocation(centeredLocation)
             MacAppActivation.requestForeground()
             window.isVisible = true
             window.focusableWindowState = true
@@ -272,6 +296,9 @@ private fun FrameWindowScope.AppRootWindowContent(
                 onSelectPrevious = viewModel::selectPrevious,
                 onSelectNext = viewModel::selectNext,
                 onSelectItem = viewModel::selectItem,
+                onToggleFavorite = viewModel::toggleFavorite,
+                onTogglePinned = viewModel::togglePinned,
+                onToggleFavoritesOnly = viewModel::toggleFavoritesOnly,
             )
         }
     }
@@ -287,3 +314,19 @@ private fun rememberWindowState(
     height = height,
     position = position,
 )
+
+private fun WindowState.centerOnDefaultScreen(
+    width: Dp,
+    height: Dp,
+): Point {
+    val bounds = GraphicsEnvironment
+        .getLocalGraphicsEnvironment()
+        .defaultScreenDevice
+        .defaultConfiguration
+        .bounds
+    val x = bounds.x + ((bounds.width - width.value.roundToInt()) / 2)
+    val y = bounds.y + ((bounds.height - height.value.roundToInt()) / 2)
+
+    position = WindowPosition(x.dp, y.dp)
+    return Point(x, y)
+}
