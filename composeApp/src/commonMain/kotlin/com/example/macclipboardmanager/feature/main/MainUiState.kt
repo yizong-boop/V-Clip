@@ -4,6 +4,7 @@ import com.example.macclipboardmanager.domain.clipboard.ClipboardItem
 
 data class MainUiState(
     val searchQuery: String = "",
+    val favoritesOnly: Boolean = false,
     val filteredItems: List<ClipboardItem> = emptyList(),
     val selectedItemId: String? = null,
     val toastMessage: String? = null,

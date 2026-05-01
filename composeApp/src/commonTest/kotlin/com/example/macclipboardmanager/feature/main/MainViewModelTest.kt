@@ -82,6 +82,46 @@ class MainViewModelTest {
     }
 
     @Test
+    fun favoritesOnlyFiltersResultsAndKeepsSearchQueryApplied() = runTest {
+        val repository = testRepository()
+        repository.add("Alpha")
+        repository.add("beta")
+        repository.add("alphabet soup")
+        repository.toggleFavorite("item-0")
+        repository.toggleFavorite("item-2")
+        val viewModel = createViewModel(repository = repository, scope = this)
+
+        advanceUntilIdle()
+        viewModel.toggleFavoritesOnly()
+        viewModel.updateSearchQuery("alp")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.favoritesOnly)
+        assertEquals(
+            listOf("alphabet soup", "Alpha"),
+            viewModel.uiState.value.filteredItems.map { it.text },
+        )
+        viewModel.close()
+    }
+
+    @Test
+    fun togglingPinnedKeepsSelectedItemSelectedAfterReorder() = runTest {
+        val repository = testRepository()
+        repository.add("one")
+        repository.add("two")
+        val viewModel = createViewModel(repository = repository, scope = this)
+
+        advanceUntilIdle()
+        viewModel.selectItem("item-0")
+        viewModel.togglePinned("item-0")
+        advanceUntilIdle()
+
+        assertEquals("one", viewModel.uiState.value.selectedItem?.text)
+        assertEquals(listOf("one", "two"), viewModel.uiState.value.filteredItems.map { it.text })
+        viewModel.close()
+    }
+
+    @Test
     fun noSearchResultsClearSelection() = runTest {
         val repository = testRepository()
         repository.add("hello")
@@ -156,6 +196,28 @@ class MainViewModelTest {
         assertEquals(
             MainEffect.ConfirmSelection(text = "hello"),
             effect.await(),
+        )
+        viewModel.close()
+    }
+
+    @Test
+    fun confirmSelectionMovesPinnedItemWithinPinnedGroup() = runTest {
+        val repository = testRepository()
+        repository.add("first pinned")
+        repository.add("second pinned")
+        repository.add("regular")
+        repository.togglePinned("item-0")
+        repository.togglePinned("item-1")
+        val viewModel = createViewModel(repository = repository, scope = this)
+
+        advanceUntilIdle()
+        viewModel.selectItem("item-0")
+        viewModel.confirmSelection()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf("first pinned", "second pinned", "regular"),
+            viewModel.uiState.value.filteredItems.map { it.text },
         )
         viewModel.close()
     }

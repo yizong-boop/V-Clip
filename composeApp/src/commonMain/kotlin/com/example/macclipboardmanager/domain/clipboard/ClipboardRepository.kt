@@ -15,6 +15,8 @@ class ClipboardRepository(
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val idGeneratorOverride: (() -> String)? = null,
     private val maxHistorySize: Int = 500,
+    // TODO: Revisit long clipboard text handling. Truncating before dedupe can
+    // collapse distinct long entries that share the same prefix.
     private val maxTextLength: Int = 10_000,
     private val store: ClipboardStore? = null,
     private val persistenceScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -70,7 +72,7 @@ class ClipboardRepository(
                 }
             }
 
-            trim(newList)
+            trimAndSort(newList)
         }
         persistIfNeeded(mutableItems.value)
     }
@@ -90,9 +92,21 @@ class ClipboardRepository(
                 }
             }
 
-            trim(newList)
+            trimAndSort(newList)
         }
         persistIfNeeded(mutableItems.value)
+    }
+
+    fun toggleFavorite(itemId: String) {
+        updateItem(itemId) { item ->
+            item.copy(isFavorite = !item.isFavorite)
+        }
+    }
+
+    fun togglePinned(itemId: String) {
+        updateItem(itemId) { item ->
+            item.copy(isPinned = !item.isPinned)
+        }
     }
 
     fun clear() {
@@ -114,8 +128,35 @@ class ClipboardRepository(
     suspend fun loadFromStore() {
         val stored = store?.load() ?: return
         if (stored.isEmpty()) return
-        mutableItems.value = trim(stored)
+        mutableItems.value = trimAndSort(stored)
         seedIdCounterFrom(stored)
+    }
+
+    private fun updateItem(
+        itemId: String,
+        transform: (ClipboardItem) -> ClipboardItem,
+    ) {
+        var changed = false
+        mutableItems.update { currentItems ->
+            val updatedItems = currentItems.map { item ->
+                if (item.id == itemId) {
+                    changed = true
+                    transform(item)
+                } else {
+                    item
+                }
+            }
+
+            if (changed) {
+                trimAndSort(updatedItems)
+            } else {
+                currentItems
+            }
+        }
+
+        if (changed) {
+            persistIfNeeded(mutableItems.value)
+        }
     }
 
     private fun seedIdCounterFrom(items: List<ClipboardItem>) {
@@ -130,8 +171,30 @@ class ClipboardRepository(
         return id.removePrefix("clipboard-").toLongOrNull()
     }
 
-    private fun trim(items: List<ClipboardItem>): List<ClipboardItem> =
-        if (items.size <= maxHistorySize) items else items.take(maxHistorySize)
+    private fun trimAndSort(items: List<ClipboardItem>): List<ClipboardItem> {
+        val sortedItems = sortItems(items)
+        if (sortedItems.size <= maxHistorySize) {
+            return sortedItems
+        }
+
+        val protectedItems = sortedItems.filter { it.isFavorite || it.isPinned }
+        val removableItems = sortedItems.filterNot { it.isFavorite || it.isPinned }
+        val remainingCapacity = maxHistorySize - protectedItems.size
+        if (remainingCapacity <= 0) {
+            return protectedItems
+        }
+
+        return sortItems(protectedItems + removableItems.take(remainingCapacity))
+    }
+
+    private fun sortItems(items: List<ClipboardItem>): List<ClipboardItem> =
+        items.withIndex()
+            .sortedWith(
+                compareByDescending<IndexedValue<ClipboardItem>> { it.value.isPinned }
+                    .thenByDescending { it.value.copiedAtEpochMillis }
+                    .thenBy { it.index },
+            )
+            .map { it.value }
 
     private fun persistIfNeeded(items: List<ClipboardItem>) {
         val currentStore = store ?: return

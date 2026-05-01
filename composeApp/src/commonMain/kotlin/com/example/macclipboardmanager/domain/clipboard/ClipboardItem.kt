@@ -7,4 +7,6 @@ data class ClipboardItem(
     val id: String,
     val text: String,
     val copiedAtEpochMillis: Long,
+    val isFavorite: Boolean = false,
+    val isPinned: Boolean = false,
 )

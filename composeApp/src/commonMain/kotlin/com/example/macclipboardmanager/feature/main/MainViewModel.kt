@@ -38,6 +38,7 @@ class MainViewModel(
     private val mutableUiState = MutableStateFlow(MainUiState())
     private val mutableEffects = MutableSharedFlow<MainEffect>(extraBufferCapacity = 16)
     private val searchQuery = MutableStateFlow("")
+    private val favoritesOnly = MutableStateFlow(false)
     private val workerScope = CoroutineScope(
         effectiveScope.coroutineContext + SupervisorJob(effectiveScope.coroutineContext[Job]),
     )
@@ -52,11 +53,17 @@ class MainViewModel(
 
     init {
         workerScope.launch {
-            combine(repository.items, searchQuery) { items, query ->
-                buildState(items = items, searchQuery = query)
+            combine(repository.items, searchQuery, favoritesOnly) { items, query, favoritesOnly ->
+                buildState(items = items, searchQuery = query, favoritesOnly = favoritesOnly)
             }.collect { state ->
                 mutableUiState.update { currentState ->
-                    state.copy(toastMessage = currentState.toastMessage)
+                    val selectedItemId = currentState.selectedItemId
+                        ?.takeIf { id -> state.filteredItems.any { it.id == id } }
+                        ?: state.filteredItems.firstOrNull()?.id
+                    state.copy(
+                        selectedItemId = selectedItemId,
+                        toastMessage = currentState.toastMessage,
+                    )
                 }
             }
         }
@@ -97,6 +104,10 @@ class MainViewModel(
         searchQuery.value = ""
     }
 
+    fun toggleFavoritesOnly() {
+        favoritesOnly.value = !favoritesOnly.value
+    }
+
     fun resetSelectionToFirst() {
         mutableUiState.update { currentState ->
             currentState.copy(selectedItemId = currentState.filteredItems.firstOrNull()?.id)
@@ -119,6 +130,14 @@ class MainViewModel(
 
     fun selectPrevious() {
         moveSelection(step = -1)
+    }
+
+    fun toggleFavorite(itemId: String) {
+        repository.toggleFavorite(itemId)
+    }
+
+    fun togglePinned(itemId: String) {
+        repository.togglePinned(itemId)
     }
 
     fun confirmSelection() {
@@ -166,25 +185,28 @@ class MainViewModel(
     private fun buildState(
         items: List<ClipboardItem>,
         searchQuery: String,
+        favoritesOnly: Boolean,
     ): MainUiState {
-        val filteredItems = filterItems(items = items, searchQuery = searchQuery)
+        val filteredItems = filterItems(
+            items = items,
+            searchQuery = searchQuery,
+            favoritesOnly = favoritesOnly,
+        )
         return MainUiState(
             searchQuery = searchQuery,
+            favoritesOnly = favoritesOnly,
             filteredItems = filteredItems,
-            selectedItemId = filteredItems.firstOrNull()?.id,
         )
     }
 
     private fun filterItems(
         items: List<ClipboardItem>,
         searchQuery: String,
+        favoritesOnly: Boolean,
     ): List<ClipboardItem> {
-        if (searchQuery.isBlank()) {
-            return items
-        }
-
         return items.filter { item ->
-            item.text.contains(searchQuery, ignoreCase = true)
+            (!favoritesOnly || item.isFavorite) &&
+                (searchQuery.isBlank() || item.text.contains(searchQuery, ignoreCase = true))
         }
     }
 
