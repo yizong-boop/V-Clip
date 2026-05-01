@@ -63,6 +63,15 @@ fun AppRoot(onCloseRequest: () -> Unit) {
     )
     val spotlightWindowState = remember { SpotlightWindowState() }
     val spotlightController = remember { SpotlightWindowController() }
+    val previousApplicationFocusController = remember {
+        PreviousApplicationFocusController(
+            captureFocusedApplicationProcessId = MacAppActivation::captureFrontmostApplicationProcessId,
+            reactivateApplication = MacAppActivation::reactivateApplication,
+            onRestoreFailure = {
+                System.err.println("Unable to reactivate the previously focused application.")
+            },
+        )
+    }
     val focusRequester = remember { FocusRequester() }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val uiState by viewModel.uiState.collectAsState()
@@ -73,6 +82,7 @@ fun AppRoot(onCloseRequest: () -> Unit) {
         clipboardPasteController = clipboardPasteController,
         spotlightWindowState = spotlightWindowState,
         spotlightController = spotlightController,
+        previousApplicationFocusController = previousApplicationFocusController,
         onPrepareShowWindow = {
             windowState.position = WindowPosition(Alignment.Center)
         },
@@ -104,6 +114,7 @@ fun AppRoot(onCloseRequest: () -> Unit) {
             uiState = uiState,
             focusRequester = focusRequester,
             spotlightController = spotlightController,
+            previousApplicationFocusController = previousApplicationFocusController,
             listState = listState,
             viewModel = viewModel,
             spotlightWindowState = spotlightWindowState,
@@ -122,6 +133,7 @@ private fun FrameWindowScope.AppRootWindowContent(
     uiState: MainUiState,
     focusRequester: FocusRequester,
     spotlightController: SpotlightWindowController,
+    previousApplicationFocusController: PreviousApplicationFocusController,
     listState: LazyListState,
     viewModel: MainViewModel,
     spotlightWindowState: SpotlightWindowState,
@@ -130,19 +142,22 @@ private fun FrameWindowScope.AppRootWindowContent(
 ) {
     val backgroundClickInteraction = remember { MutableInteractionSource() }
 
-    fun hideWindowContent() {
+    fun hideWindowContent(restorePreviousApplicationFocus: Boolean = true) {
         spotlightWindowState.hide()
         viewModel.clearSearchQuery()
         viewModel.clearToast()
         onFailureToastVisibleChanged(false)
         spotlightController.onShowComplete()
+        if (restorePreviousApplicationFocus) {
+            previousApplicationFocusController.restore()
+        }
     }
 
     DisposableEffect(window) {
         fun handleBlur() {
             val now = System.currentTimeMillis()
             if (spotlightWindowState.isVisible && spotlightController.shouldHideOnBlur(now)) {
-                hideWindowContent()
+                hideWindowContent(restorePreviousApplicationFocus = false)
             }
         }
 
@@ -180,7 +195,7 @@ private fun FrameWindowScope.AppRootWindowContent(
             if (spotlightWindowState.isVisible &&
                 spotlightController.shouldHideDeferredBlur(System.currentTimeMillis())
             ) {
-                hideWindowContent()
+                hideWindowContent(restorePreviousApplicationFocus = false)
             }
         }
     }
@@ -253,7 +268,7 @@ private fun FrameWindowScope.AppRootWindowContent(
                 },
                 onSearchQueryChange = viewModel::updateSearchQuery,
                 onConfirmSelection = viewModel::confirmSelection,
-                onHideRequest = ::hideWindowContent,
+                onHideRequest = { hideWindowContent() },
                 onSelectPrevious = viewModel::selectPrevious,
                 onSelectNext = viewModel::selectNext,
                 onSelectItem = viewModel::selectItem,

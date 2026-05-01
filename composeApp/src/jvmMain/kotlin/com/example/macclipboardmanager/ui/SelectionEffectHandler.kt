@@ -3,10 +3,6 @@ package com.example.macclipboardmanager.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import com.example.macclipboardmanager.core.diagnostics.PrintStreamDiagnostics
 import com.example.macclipboardmanager.feature.main.MainEffect
 import com.example.macclipboardmanager.feature.main.MainViewModel
@@ -27,11 +23,10 @@ internal fun SelectionEffectHandler(
     clipboardPasteController: ClipboardPasteController,
     spotlightWindowState: SpotlightWindowState,
     spotlightController: SpotlightWindowController,
+    previousApplicationFocusController: PreviousApplicationFocusController,
     onPrepareShowWindow: () -> Unit,
     onAutoPasteFailureVisibleChanged: (Boolean) -> Unit,
 ) {
-    var previousFrontmostAppProcessId by remember { mutableStateOf<Int?>(null) }
-
     DisposableEffect(Unit) {
         bootstrapMacApp()
         viewModel.start()
@@ -50,14 +45,13 @@ internal fun SelectionEffectHandler(
                         viewModel.clearToast()
                         spotlightController.onShowComplete()
                         onAutoPasteFailureVisibleChanged(false)
-                        previousFrontmostAppProcessId = null
+                        previousApplicationFocusController.restore()
                     } else {
                         viewModel.clearToast()
                         onAutoPasteFailureVisibleChanged(false)
                         viewModel.clearSearchQuery()
                         viewModel.resetSelectionToFirst()
-                        previousFrontmostAppProcessId =
-                            MacAppActivation.captureFrontmostApplicationProcessId()
+                        previousApplicationFocusController.capture()
                         onPrepareShowWindow()
                         MacAppActivation.requestForeground()
                         spotlightWindowState.show()
@@ -73,20 +67,12 @@ internal fun SelectionEffectHandler(
                             onHideWindow = { spotlightWindowState.hide() },
                             onClearSearchQuery = viewModel::clearSearchQuery,
                             onRestorePreviousAppFocus = {
-                                val processId = previousFrontmostAppProcessId
-                                if (processId == null ||
-                                    !MacAppActivation.reactivateApplication(processId)
-                                ) {
-                                    System.err.println(
-                                        "Unable to reactivate the previously focused " +
-                                            "application before auto-paste.",
-                                    )
-                                }
-                                previousFrontmostAppProcessId = null
+                                previousApplicationFocusController.restore()
                             },
                             diagnostics = PrintStreamDiagnostics(),
                             onAutoPasteFailure = {
                                 onAutoPasteFailureVisibleChanged(true)
+                                previousApplicationFocusController.capture()
                                 onPrepareShowWindow()
                                 spotlightWindowState.show()
                                 spotlightController.prepareShow()
