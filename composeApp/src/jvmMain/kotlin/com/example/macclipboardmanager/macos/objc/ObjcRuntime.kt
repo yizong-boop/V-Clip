@@ -32,6 +32,9 @@ internal object ObjcRuntime {
     fun sendInt(receiver: Pointer, selectorName: String, vararg args: Any?): Int =
         objcMsgSend.invoke(Int::class.javaObjectType, messageArgs(receiver, selectorName, *args)) as Int
 
+    fun sendDouble(receiver: Pointer, selectorName: String, vararg args: Any?): Double =
+        objcMsgSend.invoke(Double::class.javaObjectType, messageArgs(receiver, selectorName, *args)) as Double
+
     fun sendVoid(receiver: Pointer, selectorName: String, vararg args: Any?) {
         objcMsgSend.invoke(Void::class.java, messageArgs(receiver, selectorName, *args))
     }

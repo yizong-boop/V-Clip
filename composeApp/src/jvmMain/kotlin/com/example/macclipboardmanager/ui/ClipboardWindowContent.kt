@@ -9,8 +9,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
@@ -61,7 +61,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
@@ -70,20 +71,26 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.FrameWindowScope
 import com.example.macclipboardmanager.domain.clipboard.ClipboardItem
 import com.example.macclipboardmanager.feature.main.MainUiState
+import com.example.macclipboardmanager.theme.AppThemePreference
+import java.awt.AWTEvent
+import java.awt.Component
 import java.awt.MouseInfo
 import java.awt.Point
+import java.awt.Toolkit
 import java.awt.Window
+import java.awt.event.AWTEventListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
 import kotlinx.coroutines.launch
 import kotlin.math.PI
+import kotlin.math.max
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -94,6 +101,7 @@ fun FrameWindowScope.ClipboardWindowContent(
     focusRequester: FocusRequester,
     focusRequestKey: Int,
     listState: LazyListState,
+    themePreference: AppThemePreference,
     relativeTimeFormatter: (Long) -> String,
     onSearchQueryChange: (String) -> Unit,
     onConfirmSelection: () -> Unit,
@@ -105,16 +113,17 @@ fun FrameWindowScope.ClipboardWindowContent(
     onTogglePinned: (String) -> Unit,
     onToggleFavoritesOnly: () -> Unit,
 ) {
+    val theme = remember(themePreference) { clipboardThemeSpec(themePreference) }
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
     var listViewportWidthPx by remember { mutableIntStateOf(0) }
     val selectedItemTextStyle = MaterialTheme.typography.bodyLarge.copy(
-        color = Color(0xFF111827),
+        color = theme.primaryText,
         fontWeight = FontWeight.Normal,
     )
     val windowShape = RoundedCornerShape(28.dp)
     val relativeTimeTextStyle = MaterialTheme.typography.labelMedium.copy(
-        color = Color(0xFF6B7280),
+        color = theme.secondaryText,
         fontWeight = FontWeight.Medium,
     )
     val focusRestoreScope = rememberCoroutineScope()
@@ -141,14 +150,13 @@ fun FrameWindowScope.ClipboardWindowContent(
 
     Surface(
         modifier = Modifier
-            .width(600.dp)
-            .heightIn(max = 520.dp)
+            .fillMaxSize()
             .shadow(
                 elevation = 14.dp,
                 shape = windowShape,
                 clip = false,
-                ambientColor = Color(0x14000000),
-                spotColor = Color(0x1A000000),
+                ambientColor = theme.panelShadowAmbient,
+                spotColor = theme.panelShadowSpot,
             )
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) {
@@ -182,24 +190,42 @@ fun FrameWindowScope.ClipboardWindowContent(
             }
             .border(
                 width = 1.dp,
-                color = Color(0x120F172A),
+                color = theme.panelBorder,
                 shape = windowShape,
             ),
-        color = Color(0xFFF6F3EC),
+        color = theme.panelFill,
         shape = windowShape,
         shadowElevation = 0.dp,
     ) {
         Box(
             modifier = Modifier
-                .background(Color(0xFFF6F3EC))
                 .padding(vertical = 14.dp),
         ) {
+            if (theme.isFrostedGlass) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(118.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(theme.topLightStart, theme.topLightEnd),
+                            ),
+                        ),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .border(1.dp, theme.rim, windowShape),
+                )
+            }
+
             Column(
                 verticalArrangement = Arrangement.Top,
             ) {
                 ClipboardSearchField(
                     query = uiState.searchQuery,
                     favoritesOnly = uiState.favoritesOnly,
+                    theme = theme,
                     focusRequester = focusRequester,
                     focusRequestKey = focusRequestKey,
                     onValueChange = onSearchQueryChange,
@@ -210,10 +236,10 @@ fun FrameWindowScope.ClipboardWindowContent(
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                    color = Color(0x140F172A),
+                    color = theme.divider,
                 )
                 if (uiState.filteredItems.isEmpty()) {
-                    EmptyClipboardState()
+                    EmptyClipboardState(theme = theme)
                 } else {
                     LazyColumn(
                         state = listState,
@@ -229,6 +255,7 @@ fun FrameWindowScope.ClipboardWindowContent(
                             ClipboardListItem(
                                 item = item,
                                 isSelected = item.id == uiState.selectedItemId,
+                                theme = theme,
                                 relativeTime = relativeTimeFormatter(item.copiedAtEpochMillis),
                                 onClick = {
                                     onSelectItem(item.id)
@@ -258,6 +285,7 @@ fun FrameWindowScope.ClipboardWindowContent(
             ) {
                 ToastBubble(
                     message = uiState.toastMessage.orEmpty(),
+                    theme = theme,
                 )
             }
         }
@@ -268,6 +296,7 @@ fun FrameWindowScope.ClipboardWindowContent(
 private fun FrameWindowScope.ClipboardSearchField(
     query: String,
     favoritesOnly: Boolean,
+    theme: ClipboardThemeSpec,
     focusRequester: FocusRequester,
     focusRequestKey: Int,
     onValueChange: (String) -> Unit,
@@ -303,26 +332,33 @@ private fun FrameWindowScope.ClipboardSearchField(
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
     ) {
-        Row(
+        SmoothWindowDragArea(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(24.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .height(30.dp),
         ) {
-            SmoothWindowDragArea(
+            Row(
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .height(24.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                ClipboardTitle()
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(24.dp),
+                ) {
+                    ClipboardTitle(theme = theme)
+                }
+                ClipboardActionButton(
+                    type = ClipboardActionType.Favorite,
+                    isActive = favoritesOnly,
+                    isVisible = true,
+                    activeColor = theme.favoriteAccent,
+                    inactiveColor = theme.inactiveIcon,
+                    onClick = onToggleFavoritesOnly,
+                )
             }
-            ClipboardActionButton(
-                type = ClipboardActionType.Favorite,
-                isActive = favoritesOnly,
-                isVisible = true,
-                activeColor = Color(0xFFE6B84A),
-                onClick = onToggleFavoritesOnly,
-            )
         }
         Spacer(modifier = Modifier.height(6.dp))
         BasicTextField(
@@ -339,10 +375,10 @@ private fun FrameWindowScope.ClipboardSearchField(
                 .focusRequester(focusRequester),
             singleLine = true,
             textStyle = MaterialTheme.typography.headlineSmall.copy(
-                color = Color(0xFF111827),
+                color = theme.primaryText,
                 fontWeight = FontWeight.SemiBold,
             ),
-            cursorBrush = SolidColor(Color(0xFF111827)),
+            cursorBrush = SolidColor(theme.primaryText),
             decorationBox = { innerTextField ->
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -352,8 +388,8 @@ private fun FrameWindowScope.ClipboardSearchField(
                         Text(
                             text = "Search clipboard history",
                             style = MaterialTheme.typography.headlineSmall.copy(
-                                color = Color(0xFF9CA3AF),
-                                fontWeight = FontWeight.Medium,
+                                color = theme.placeholderText,
+                                fontWeight = FontWeight.Normal,
                             ),
                         )
                     }
@@ -363,6 +399,39 @@ private fun FrameWindowScope.ClipboardSearchField(
         )
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 窗口拖拽实现 — 请勿随意修改
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 背景：这是一个 macOS 无边框透明置顶窗口。拖拽经历了多轮试错才稳定。
+// 完整复盘见：docs/window-dragging-technical-note.md
+//
+// ❌ 不要做的事（都试过，都失败了）：
+//   1. 不要用 NSApplication.currentEvent + performWindowDragWithEvent:
+//      → 窗口关闭重开后 currentEvent 过期，窗口瞬移。
+//   2. 不要用 Compose 官方的 WindowDraggableArea：
+//      → 每次 mouseDragged 都调 MouseInfo.getPointerInfo()，手感差。
+//   3. 不要在 AWT mousePressed 里调 performWindowDragWithEvent:：
+//      → AWT 事件分发时机下 currentEvent 仍不可靠，经常被校验逻辑拦截导致无法拖拽。
+//   4. 不要删 runCatching：
+//      → 窗口隐藏/销毁时 removeMouseListener 可能因窗口已 dispose 抛异常。
+//
+// ✅ 当前方案（SmoothWindowDragHandler）：
+//   架构：Compose 只负责同步「标题区域 bounds」→ AWT mousePressed 命中后进入拖拽态 →
+//         AWT mouseDragged 直接读 MouseEvent.locationOnScreen 计算位移 →
+//         调 window.setLocation() → 鼠标释放时移除监听器。
+//   优点：不依赖 NSApplication.currentEvent，不被 AppKit 事件生命周期影响；
+//         不再依赖 Compose pointerInput 能否收到首次按下；拖动中用
+//         MouseEvent.locationOnScreen 而非 MouseInfo.getPointerInfo()。
+//
+// ⚠️  remember(window) 的必要性：
+//   V-Clip 窗口每次 show/hide 会重建 AWT Window 对象。用 window 作为 key
+//   确保每次重建拿到新的 SmoothWindowDragHandler，避免操作已销毁的旧 window。
+//
+// 未来如果要追求原生丝滑手感，正确方向是 swizzle NSView.mouseDown: 拿到
+// 真正的 NSEvent 再调 performWindowDragWithEvent:，而不是回到 currentEvent 路线。
+// ═══════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun FrameWindowScope.SmoothWindowDragArea(
@@ -377,12 +446,10 @@ private fun FrameWindowScope.SmoothWindowDragArea(
         }
     }
 
+    // Compose 只负责提供标题区域 bounds，真正的按下/拖拽由 AWT 监听器处理。
     Box(
-        modifier = modifier.pointerInput(dragHandler) {
-            awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
-                dragHandler.onDragStarted()
-            }
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            dragHandler.updateDragBounds(coordinates.boundsInWindow())
         },
     ) {
         content()
@@ -394,55 +461,128 @@ private class SmoothWindowDragHandler(
 ) {
     private var windowLocationAtDragStart: IntOffset? = null
     private var dragStartPoint: IntOffset? = null
+    private var dragBounds: Rect = Rect.Zero
 
-    private val dragListener = object : MouseMotionAdapter() {
-        override fun mouseDragged(event: MouseEvent) {
-            onDrag(event)
+    private val mouseEventListener = AWTEventListener { awtEvent ->
+        val event = awtEvent as? MouseEvent ?: return@AWTEventListener
+        val belongsToWindow = belongsToWindow(event.component)
+        if (event.id == MouseEvent.MOUSE_PRESSED) {
+            DragDebugLog.log(
+                "awtMousePressed component=${event.component?.javaClass?.name} " +
+                    "point=(${event.x}, ${event.y}) belongsToWindow=$belongsToWindow",
+            )
+        }
+        if (!belongsToWindow) {
+            return@AWTEventListener
+        }
+        when (event.id) {
+            MouseEvent.MOUSE_PRESSED -> onPress(event)
+            MouseEvent.MOUSE_DRAGGED -> onDrag(event)
+            MouseEvent.MOUSE_RELEASED -> stopDrag()
         }
     }
 
-    private val releaseListener = object : MouseAdapter() {
-        override fun mouseReleased(event: MouseEvent) {
-            stopDrag()
-        }
+    init {
+        Toolkit.getDefaultToolkit().addAWTEventListener(
+            mouseEventListener,
+            AWTEvent.MOUSE_EVENT_MASK or AWTEvent.MOUSE_MOTION_EVENT_MASK,
+        )
     }
 
-    fun onDragStarted() {
-        stopDrag()
-        dragStartPoint = MouseInfo.getPointerInfo()?.location?.toComposeOffset() ?: return
+    fun updateDragBounds(bounds: Rect) {
+        dragBounds = bounds.expandForDragHitArea(
+            leftExpansion = bounds.left,
+            topExpansion = bounds.top,
+            rightExpansion = 0f,
+            bottomExpansion = 40f,
+        )
+    }
+
+    private fun onPress(event: MouseEvent) {
+        if (event.button != MouseEvent.BUTTON1) {
+            return
+        }
+        val pointInWindow = Offset(event.x.toFloat(), event.y.toFloat())
+        if (!dragBounds.contains(pointInWindow)) {
+            DragDebugLog.log("pressIgnoredOutsideDragBounds point=$pointInWindow bounds=$dragBounds")
+            return
+        }
+        DragDebugLog.log("titlePointerDown point=$pointInWindow bounds=$dragBounds")
+        stopDrag() // 防御：上一次拖拽可能未正常结束（如鼠标在窗口外释放）
+        dragStartPoint = runCatching {
+            event.locationOnScreen.toComposeOffset()
+        }.getOrElse {
+            MouseInfo.getPointerInfo()?.location?.toComposeOffset() ?: return
+        }
         windowLocationAtDragStart = window.location.toComposeOffset()
-        window.addMouseListener(releaseListener)
-        window.addMouseMotionListener(dragListener)
+        DragDebugLog.log(
+            "dragStarted startPoint=$dragStartPoint windowLocation=$windowLocationAtDragStart",
+        )
     }
 
     private fun onDrag(event: MouseEvent) {
         val startLocation = windowLocationAtDragStart ?: return
         val startPoint = dragStartPoint ?: return
+        // 优先用 MouseEvent.locationOnScreen（比 MouseInfo.getPointerInfo() 路径更短）
         val currentPoint = runCatching {
             event.locationOnScreen.toComposeOffset()
         }.getOrElse {
+            // fallback：极少数情况下 locationOnScreen 抛异常
             MouseInfo.getPointerInfo()?.location?.toComposeOffset() ?: return
         }
         val newLocation = startLocation + (currentPoint - startPoint)
+        DragDebugLog.log(
+            "mouseDragged currentPoint=$currentPoint newLocation=$newLocation",
+        )
         window.setLocation(newLocation.x, newLocation.y)
     }
 
     private fun stopDrag() {
-        window.removeMouseMotionListener(dragListener)
-        window.removeMouseListener(releaseListener)
+        if (windowLocationAtDragStart != null || dragStartPoint != null) {
+            DragDebugLog.log("dragStopped")
+        }
         windowLocationAtDragStart = null
         dragStartPoint = null
     }
 
     fun dispose() {
+        runCatching {
+            Toolkit.getDefaultToolkit().removeAWTEventListener(mouseEventListener)
+        }
         stopDrag()
     }
+
+    private fun belongsToWindow(component: Component?): Boolean {
+        var current = component
+        while (current != null) {
+            if (current === window) {
+                return true
+            }
+            current = current.parent
+        }
+        return false
+    }
+
 }
 
-private fun Point.toComposeOffset(): IntOffset = IntOffset(x = x, y = y)
+private fun Point.toComposeOffset(): IntOffset = IntOffset(x, y)
+
+private fun Rect.expandForDragHitArea(
+    leftExpansion: Float,
+    topExpansion: Float,
+    rightExpansion: Float,
+    bottomExpansion: Float,
+): Rect = Rect(
+    left = max(0f, left - leftExpansion),
+    top = max(0f, top - topExpansion),
+    right = right + rightExpansion,
+    bottom = bottom + bottomExpansion,
+)
+
+// IntOffset.plus / IntOffset.minus 由 Compose 框架提供，不需要自定义运算符
 
 @Composable
-private fun ClipboardTitle() {
+private fun ClipboardTitle(theme: ClipboardThemeSpec) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.CenterStart,
@@ -451,7 +591,7 @@ private fun ClipboardTitle() {
             text = "Clipboard",
             modifier = Modifier.fillMaxWidth(),
             style = TextStyle(
-                color = Color(0xFF6B7280),
+                color = theme.secondaryText,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
             ),
@@ -463,13 +603,13 @@ private fun ClipboardTitle() {
 private fun ClipboardListItem(
     item: ClipboardItem,
     isSelected: Boolean,
+    theme: ClipboardThemeSpec,
     relativeTime: String,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onTogglePinned: () -> Unit,
 ) {
-    val selectedAccentColor = Color(0xFFCE8381)
-    val backgroundColor = if (isSelected) Color(0xFFF6EBE8) else Color.Transparent
+    val backgroundColor = if (isSelected) theme.selectedRowFill else Color.Transparent
     val interactionSource = remember { MutableInteractionSource() }
     val density = LocalDensity.current
     var itemHeightPx by remember { mutableIntStateOf(0) }
@@ -499,7 +639,7 @@ private fun ClipboardListItem(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .size(width = 6.dp, height = indicatorHeight)
-                    .background(selectedAccentColor, RoundedCornerShape(3.dp)),
+                    .background(theme.selectedAccent, RoundedCornerShape(3.dp)),
             )
         }
 
@@ -514,7 +654,7 @@ private fun ClipboardListItem(
                 text = item.text,
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    color = Color(0xFF111827),
+                    color = theme.primaryText,
                     fontWeight = FontWeight.Normal,
                 ),
                 maxLines = 3,
@@ -522,34 +662,43 @@ private fun ClipboardListItem(
             )
             Spacer(modifier = Modifier.width(12.dp))
             Row(
+                modifier = Modifier.width(
+                    ClipboardListItemLayout.trailingActionAreaWidthDp(
+                        isSelected = isSelected,
+                        isFavorite = item.isFavorite,
+                        isPinned = item.isPinned,
+                    ).dp,
+                ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.End,
             ) {
                 Text(
                     text = relativeTime,
                     style = MaterialTheme.typography.labelMedium.copy(
-                        color = Color(0xFF6B7280),
+                        color = theme.secondaryText,
                         fontWeight = FontWeight.Medium,
                     ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                if (showActions) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    ClipboardActionButton(
-                        type = ClipboardActionType.Favorite,
-                        isActive = item.isFavorite,
-                        isVisible = true,
-                        activeColor = Color(0xFFE6B84A),
-                        onClick = onToggleFavorite,
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    ClipboardActionButton(
-                        type = ClipboardActionType.Pin,
-                        isActive = item.isPinned,
-                        isVisible = true,
-                        activeColor = selectedAccentColor,
-                        onClick = onTogglePinned,
-                    )
-                }
+                Spacer(modifier = Modifier.width(8.dp))
+                ClipboardActionButton(
+                    type = ClipboardActionType.Favorite,
+                    isActive = item.isFavorite,
+                    isVisible = showActions,
+                    activeColor = theme.favoriteAccent,
+                    inactiveColor = theme.inactiveIcon,
+                    onClick = onToggleFavorite,
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                ClipboardActionButton(
+                    type = ClipboardActionType.Pin,
+                    isActive = item.isPinned,
+                    isVisible = showActions,
+                    activeColor = theme.selectedAccent,
+                    inactiveColor = theme.inactiveIcon,
+                    onClick = onTogglePinned,
+                )
             }
         }
     }
@@ -566,6 +715,7 @@ private fun ClipboardActionButton(
     isActive: Boolean,
     isVisible: Boolean,
     activeColor: Color,
+    inactiveColor: Color,
     onClick: () -> Unit,
 ) {
     if (!isVisible) {
@@ -573,7 +723,7 @@ private fun ClipboardActionButton(
         return
     }
 
-    val iconColor = if (isActive) activeColor else Color(0xFFB8B4AC)
+    val iconColor = if (isActive) activeColor else inactiveColor
     val backgroundColor = if (isActive) iconColor.copy(alpha = 0.14f) else Color.Transparent
     val interactionSource = remember { MutableInteractionSource() }
 
@@ -681,7 +831,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPinIcon(
 }
 
 @Composable
-private fun EmptyClipboardState() {
+private fun EmptyClipboardState(theme: ClipboardThemeSpec) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -692,7 +842,7 @@ private fun EmptyClipboardState() {
         Text(
             text = "No matches found",
             style = MaterialTheme.typography.titleMedium.copy(
-                color = Color(0xFF111827),
+                color = theme.emptyStateText,
                 fontWeight = FontWeight.SemiBold,
             ),
         )
@@ -700,17 +850,20 @@ private fun EmptyClipboardState() {
             text = "Try a different keyword or copy something new.",
             modifier = Modifier.padding(top = 6.dp),
             style = MaterialTheme.typography.bodyMedium.copy(
-                color = Color(0xFF6B7280),
+                color = theme.secondaryText,
             ),
         )
     }
 }
 
 @Composable
-private fun ToastBubble(message: String) {
+private fun ToastBubble(
+    message: String,
+    theme: ClipboardThemeSpec,
+) {
     Surface(
-        color = Color(0xE6151720),
-        contentColor = Color(0xFFF8FAFC),
+        color = theme.toastFill,
+        contentColor = theme.toastText,
         shape = CircleShape,
         tonalElevation = 0.dp,
         shadowElevation = 10.dp,
@@ -723,7 +876,7 @@ private fun ToastBubble(message: String) {
                 modifier = Modifier
                     .size(8.dp)
                     .background(
-                        color = Color(0xFFF97316),
+                        color = theme.toastAccent,
                         shape = CircleShape,
                     ),
             )
@@ -731,7 +884,7 @@ private fun ToastBubble(message: String) {
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    color = Color(0xFFF8FAFC),
+                    color = theme.toastText,
                     fontWeight = FontWeight.Medium,
                 ),
             )

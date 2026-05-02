@@ -1,11 +1,9 @@
 package com.example.macclipboardmanager.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -14,6 +12,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -22,6 +21,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.FrameWindowScope
+import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
@@ -29,11 +29,15 @@ import com.example.macclipboardmanager.domain.clipboard.ClipboardRepository
 import com.example.macclipboardmanager.feature.main.MainUiState
 import com.example.macclipboardmanager.feature.main.MainViewModel
 import com.example.macclipboardmanager.macos.MacAppActivation
+import com.example.macclipboardmanager.macos.MacVisualEffectWindowStyler
 import com.example.macclipboardmanager.macos.createClipboardMonitor
 import com.example.macclipboardmanager.macos.createClipboardPasteController
 import com.example.macclipboardmanager.macos.createClipboardStore
 import com.example.macclipboardmanager.macos.createGlobalHotkeyManager
+import com.example.macclipboardmanager.macos.createThemePreferencesStore
 import com.example.macclipboardmanager.macos.paste.ClipboardPasteController
+import com.example.macclipboardmanager.theme.AppThemePreference
+import com.example.macclipboardmanager.theme.ThemeController
 import kotlinx.coroutines.delay
 import java.awt.GraphicsEnvironment
 import java.awt.Point
@@ -42,21 +46,22 @@ import java.awt.event.WindowEvent
 import java.awt.Window as AwtWindow
 import kotlin.math.roundToInt
 
-private val SpotlightWindowWidth = 640.dp
-private val SpotlightWindowHeight = 540.dp
+private val SpotlightWindowWidth = 600.dp
+private val SpotlightWindowHeight = 520.dp
 
-/**
- * Root composable for the V-Clip desktop application.
- *
- * Creates dependencies, composes the Spotlight overlay window, wires up
- * the effect handler, and manages focus retry / blur handling.
- */
 @Composable
 fun AppRoot(onCloseRequest: () -> Unit) {
     val repository = remember { ClipboardRepository(store = createClipboardStore()) }
     val clipboardMonitor = remember { createClipboardMonitor() }
     val clipboardPasteController = remember { createClipboardPasteController(clipboardMonitor) }
     val hotkeyManager = remember { createGlobalHotkeyManager() }
+    val themeScope = rememberCoroutineScope()
+    val themeController = remember {
+        ThemeController(
+            store = createThemePreferencesStore(),
+            scope = themeScope,
+        )
+    }
     val viewModel = remember {
         MainViewModel(
             repository = repository,
@@ -71,6 +76,7 @@ fun AppRoot(onCloseRequest: () -> Unit) {
     )
     val spotlightWindowState = remember { SpotlightWindowState() }
     val spotlightController = remember { SpotlightWindowController() }
+    val visualEffectWindowStyler = remember { MacVisualEffectWindowStyler() }
     val previousApplicationFocusController = remember {
         PreviousApplicationFocusController(
             captureFocusedApplicationProcessId = MacAppActivation::captureFrontmostApplicationProcessId,
@@ -83,8 +89,13 @@ fun AppRoot(onCloseRequest: () -> Unit) {
     val focusRequester = remember { FocusRequester() }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val uiState by viewModel.uiState.collectAsState()
+    val currentTheme by themeController.theme.collectAsState()
     var isFailureToastWindowVisible by remember { mutableStateOf(false) }
     var awtWindow by remember { mutableStateOf<AwtWindow?>(null) }
+
+    LaunchedEffect(themeController) {
+        themeController.load()
+    }
 
     SelectionEffectHandler(
         viewModel = viewModel,
@@ -99,6 +110,9 @@ fun AppRoot(onCloseRequest: () -> Unit) {
             )
             awtWindow?.setLocation(centeredLocation)
         },
+        onBeforeHideWindow = {
+            awtWindow?.let { visualEffectWindowStyler.dispose(it) }
+        },
         onAutoPasteFailureVisibleChanged = { isFailureToastWindowVisible = it },
     )
 
@@ -107,6 +121,7 @@ fun AppRoot(onCloseRequest: () -> Unit) {
             uiState.toastMessage == null &&
             spotlightWindowState.isVisible
         ) {
+            awtWindow?.let { visualEffectWindowStyler.dispose(it) }
             spotlightWindowState.hide()
             isFailureToastWindowVisible = false
         }
@@ -123,8 +138,13 @@ fun AppRoot(onCloseRequest: () -> Unit) {
         title = "V-Clip",
         onPreviewKeyEvent = { false },
     ) {
+        AppThemeMenuBar(
+            currentTheme = currentTheme,
+            onThemeSelected = themeController::setTheme,
+        )
         AppRootWindowContent(
             uiState = uiState,
+            currentTheme = currentTheme,
             focusRequester = focusRequester,
             spotlightController = spotlightController,
             previousApplicationFocusController = previousApplicationFocusController,
@@ -135,17 +155,15 @@ fun AppRoot(onCloseRequest: () -> Unit) {
             isFailureToastWindowVisible = isFailureToastWindowVisible,
             onFailureToastVisibleChanged = { isFailureToastWindowVisible = it },
             onWindowAvailable = { awtWindow = it },
+            visualEffectWindowStyler = visualEffectWindowStyler,
         )
     }
 }
 
-/**
- * Window-scoped composable that manages focus retry, blur handling, and
- * renders the Spotlight content.
- */
 @Composable
 private fun FrameWindowScope.AppRootWindowContent(
     uiState: MainUiState,
+    currentTheme: AppThemePreference,
     focusRequester: FocusRequester,
     spotlightController: SpotlightWindowController,
     previousApplicationFocusController: PreviousApplicationFocusController,
@@ -156,10 +174,12 @@ private fun FrameWindowScope.AppRootWindowContent(
     isFailureToastWindowVisible: Boolean,
     onFailureToastVisibleChanged: (Boolean) -> Unit,
     onWindowAvailable: (AwtWindow) -> Unit,
+    visualEffectWindowStyler: MacVisualEffectWindowStyler,
 ) {
     val backgroundClickInteraction = remember { MutableInteractionSource() }
 
     fun hideWindowContent(restorePreviousApplicationFocus: Boolean = true) {
+        visualEffectWindowStyler.dispose(window)
         spotlightWindowState.hide()
         viewModel.clearSearchQuery()
         viewModel.clearToast()
@@ -182,15 +202,18 @@ private fun FrameWindowScope.AppRootWindowContent(
 
         val windowListener = object : WindowAdapter() {
             override fun windowGainedFocus(event: WindowEvent?) {
+                DragDebugLog.log("windowGainedFocus")
                 spotlightController.onWindowGainedFocus()
             }
 
             override fun windowLostFocus(event: WindowEvent?) {
+                DragDebugLog.log("windowLostFocus")
                 spotlightController.onWindowLostFocus()
                 handleBlur()
             }
 
             override fun windowDeactivated(event: WindowEvent?) {
+                DragDebugLog.log("windowDeactivated")
                 spotlightController.onWindowLostFocus()
                 handleBlur()
             }
@@ -201,6 +224,12 @@ private fun FrameWindowScope.AppRootWindowContent(
         onDispose {
             window.removeWindowFocusListener(windowListener)
             window.removeWindowListener(windowListener)
+        }
+    }
+
+    DisposableEffect(window) {
+        onDispose {
+            visualEffectWindowStyler.dispose(window)
         }
     }
 
@@ -219,9 +248,15 @@ private fun FrameWindowScope.AppRootWindowContent(
         }
     }
 
-    // Show → focus retry burst
+    LaunchedEffect(currentTheme) {
+        if (spotlightWindowState.isVisible) {
+            visualEffectWindowStyler.apply(window, currentTheme)
+        }
+    }
+
     LaunchedEffect(spotlightWindowState.isVisible) {
         if (spotlightWindowState.isVisible) {
+            DragDebugLog.log("windowShowStart")
             if (uiState.filteredItems.isNotEmpty()) {
                 listState.scrollToItem(0)
             }
@@ -231,29 +266,29 @@ private fun FrameWindowScope.AppRootWindowContent(
                 height = SpotlightWindowHeight,
             )
             window.setLocation(centeredLocation)
-            MacAppActivation.requestForeground()
+            visualEffectWindowStyler.apply(window, currentTheme)
             window.isVisible = true
             window.focusableWindowState = true
+            MacAppActivation.requestForeground()
             window.toFront()
             window.requestFocus()
             window.requestFocusInWindow()
             window.rootPane.requestFocusInWindow()
+            DragDebugLog.log("windowShowFocusedRequestsIssued")
 
-            // Burst: immediate focus requests every frame
             repeat(12) {
                 withFrameNanos { }
                 spotlightController.forceFocusRequest()
                 delay(16L)
             }
-            // Delayed retries for late macOS focus grant
             delay(80L)
             spotlightController.forceFocusRequest()
             delay(160L)
             spotlightController.forceFocusRequest()
+            DragDebugLog.log("windowShowFocusRetryBurstCompleted")
         }
     }
 
-    // Window gains focus → push one more focus request
     LaunchedEffect(spotlightController.isWindowFocused) {
         if (spotlightController.isWindowFocused && spotlightWindowState.isVisible) {
             spotlightController.forceFocusRequest()
@@ -261,7 +296,6 @@ private fun FrameWindowScope.AppRootWindowContent(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Click-through background to dismiss
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -275,8 +309,7 @@ private fun FrameWindowScope.AppRootWindowContent(
 
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 10.dp),
+                .fillMaxSize(),
             contentAlignment = Alignment.TopCenter,
         ) {
             ClipboardWindowContent(
@@ -284,6 +317,7 @@ private fun FrameWindowScope.AppRootWindowContent(
                 focusRequester = focusRequester,
                 focusRequestKey = spotlightController.focusRequestKey,
                 listState = listState,
+                themePreference = currentTheme,
                 relativeTimeFormatter = { copiedAt ->
                     formatRelativeTime(
                         copiedAtEpochMillis = copiedAt,
@@ -300,6 +334,26 @@ private fun FrameWindowScope.AppRootWindowContent(
                 onTogglePinned = viewModel::togglePinned,
                 onToggleFavoritesOnly = viewModel::toggleFavoritesOnly,
             )
+        }
+    }
+}
+
+@Composable
+private fun FrameWindowScope.AppThemeMenuBar(
+    currentTheme: AppThemePreference,
+    onThemeSelected: (AppThemePreference) -> Unit,
+) {
+    MenuBar {
+        Menu("View") {
+            Menu("Theme") {
+                AppThemePreference.entries.forEach { theme ->
+                    RadioButtonItem(
+                        text = theme.displayName,
+                        selected = theme == currentTheme,
+                        onClick = { onThemeSelected(theme) },
+                    )
+                }
+            }
         }
     }
 }

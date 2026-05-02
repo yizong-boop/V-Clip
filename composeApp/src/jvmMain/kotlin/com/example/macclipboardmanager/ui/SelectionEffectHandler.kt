@@ -25,6 +25,7 @@ internal fun SelectionEffectHandler(
     spotlightController: SpotlightWindowController,
     previousApplicationFocusController: PreviousApplicationFocusController,
     onPrepareShowWindow: () -> Unit,
+    onBeforeHideWindow: () -> Unit = {},
     onAutoPasteFailureVisibleChanged: (Boolean) -> Unit,
 ) {
     DisposableEffect(Unit) {
@@ -40,6 +41,7 @@ internal fun SelectionEffectHandler(
             when (effect) {
                 is MainEffect.ShowWindow -> {
                     if (spotlightWindowState.isVisible) {
+                        onBeforeHideWindow()
                         spotlightWindowState.hide()
                         viewModel.clearSearchQuery()
                         viewModel.clearToast()
@@ -64,7 +66,10 @@ internal fun SelectionEffectHandler(
                         handleConfirmedSelection(
                             text = effect.text,
                             clipboardPasteController = clipboardPasteController,
-                            onHideWindow = { spotlightWindowState.hide() },
+                            onHideWindow = {
+                                onBeforeHideWindow()
+                                spotlightWindowState.hide()
+                            },
                             onClearSearchQuery = viewModel::clearSearchQuery,
                             onRestorePreviousAppFocus = {
                                 previousApplicationFocusController.restore()
