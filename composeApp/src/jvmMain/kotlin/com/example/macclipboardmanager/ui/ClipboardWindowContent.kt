@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -81,6 +82,7 @@ import java.awt.Window
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
@@ -115,6 +117,15 @@ fun FrameWindowScope.ClipboardWindowContent(
         color = Color(0xFF6B7280),
         fontWeight = FontWeight.Medium,
     )
+    val focusRestoreScope = rememberCoroutineScope()
+    val restoreSearchFieldFocus = remember(focusRequester) {
+        {
+            focusRestoreScope.launch {
+                withFrameNanos { }
+                focusRequester.requestFocus()
+            }
+        }
+    }
 
     ClipboardListScrollBehavior(
         listState = listState,
@@ -192,7 +203,10 @@ fun FrameWindowScope.ClipboardWindowContent(
                     focusRequester = focusRequester,
                     focusRequestKey = focusRequestKey,
                     onValueChange = onSearchQueryChange,
-                    onToggleFavoritesOnly = onToggleFavoritesOnly,
+                    onToggleFavoritesOnly = {
+                        onToggleFavoritesOnly()
+                        restoreSearchFieldFocus()
+                    },
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
@@ -220,8 +234,14 @@ fun FrameWindowScope.ClipboardWindowContent(
                                     onSelectItem(item.id)
                                     onConfirmSelection()
                                 },
-                                onToggleFavorite = { onToggleFavorite(item.id) },
-                                onTogglePinned = { onTogglePinned(item.id) },
+                                onToggleFavorite = {
+                                    onToggleFavorite(item.id)
+                                    restoreSearchFieldFocus()
+                                },
+                                onTogglePinned = {
+                                    onTogglePinned(item.id)
+                                    restoreSearchFieldFocus()
+                                },
                             )
                         }
                     }
