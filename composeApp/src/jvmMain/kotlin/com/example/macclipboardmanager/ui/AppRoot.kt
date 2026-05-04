@@ -40,9 +40,15 @@ import com.example.macclipboardmanager.theme.AppThemePreference
 import com.example.macclipboardmanager.theme.ThemeController
 import kotlinx.coroutines.delay
 import java.awt.GraphicsEnvironment
+import java.awt.KeyboardFocusManager
 import java.awt.Point
+import java.awt.event.ActionEvent
+import java.awt.event.KeyEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import javax.swing.AbstractAction
+import javax.swing.JComponent
+import javax.swing.KeyStroke
 import java.awt.Window as AwtWindow
 import kotlin.math.roundToInt
 
@@ -92,6 +98,7 @@ fun AppRoot(onCloseRequest: () -> Unit) {
     val currentTheme by themeController.theme.collectAsState()
     var isFailureToastWindowVisible by remember { mutableStateOf(false) }
     var awtWindow by remember { mutableStateOf<AwtWindow?>(null) }
+    val hotkeyRefreshController = remember { HotkeyRefreshController() }
 
     LaunchedEffect(themeController) {
         themeController.load()
@@ -110,8 +117,13 @@ fun AppRoot(onCloseRequest: () -> Unit) {
             )
             awtWindow?.setLocation(centeredLocation)
         },
-        onBeforeHideWindow = {
-            awtWindow?.let { visualEffectWindowStyler.dispose(it) }
+        onHideWindowAfterConfirm = {
+            spotlightWindowState.hide()
+            viewModel.clearSearchQuery()
+            viewModel.clearToast()
+            isFailureToastWindowVisible = false
+            spotlightController.onShowComplete()
+            hotkeyRefreshController.requestRefreshAfterBlur()
         },
         onAutoPasteFailureVisibleChanged = { isFailureToastWindowVisible = it },
     )
@@ -121,7 +133,6 @@ fun AppRoot(onCloseRequest: () -> Unit) {
             uiState.toastMessage == null &&
             spotlightWindowState.isVisible
         ) {
-            awtWindow?.let { visualEffectWindowStyler.dispose(it) }
             spotlightWindowState.hide()
             isFailureToastWindowVisible = false
         }
@@ -156,6 +167,7 @@ fun AppRoot(onCloseRequest: () -> Unit) {
             onFailureToastVisibleChanged = { isFailureToastWindowVisible = it },
             onWindowAvailable = { awtWindow = it },
             visualEffectWindowStyler = visualEffectWindowStyler,
+            hotkeyRefreshController = hotkeyRefreshController,
         )
     }
 }
@@ -175,11 +187,11 @@ private fun FrameWindowScope.AppRootWindowContent(
     onFailureToastVisibleChanged: (Boolean) -> Unit,
     onWindowAvailable: (AwtWindow) -> Unit,
     visualEffectWindowStyler: MacVisualEffectWindowStyler,
+    hotkeyRefreshController: HotkeyRefreshController,
 ) {
     val backgroundClickInteraction = remember { MutableInteractionSource() }
 
     fun hideWindowContent(restorePreviousApplicationFocus: Boolean = true) {
-        visualEffectWindowStyler.dispose(window)
         spotlightWindowState.hide()
         viewModel.clearSearchQuery()
         viewModel.clearToast()
@@ -192,29 +204,97 @@ private fun FrameWindowScope.AppRootWindowContent(
 
     DisposableEffect(window) {
         onWindowAvailable(window)
+        val rootPane = window.rootPane
+        val inputMap = rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+        val actionMap = rootPane.actionMap
+
+        val enterActionKey = "vclip.confirmSelection"
+        val escapeActionKey = "vclip.hideWindow"
+        val upActionKey = "vclip.selectPrevious"
+        val downActionKey = "vclip.selectNext"
+
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), enterActionKey)
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), escapeActionKey)
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), upActionKey)
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), downActionKey)
+
+        actionMap.put(
+            enterActionKey,
+            object : AbstractAction() {
+                override fun actionPerformed(event: ActionEvent?) {
+                    val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+                    System.err.println("[V-Clip] Enter key received in rootPane fallback handler (focusOwner=${focusOwner?.javaClass?.name})")
+                    viewModel.confirmSelection()
+                }
+            },
+        )
+        actionMap.put(
+            escapeActionKey,
+            object : AbstractAction() {
+                override fun actionPerformed(event: ActionEvent?) {
+                    val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+                    System.err.println("[V-Clip] Escape key received in rootPane fallback handler (focusOwner=${focusOwner?.javaClass?.name})")
+                    hideWindowContent()
+                }
+            },
+        )
+        actionMap.put(
+            upActionKey,
+            object : AbstractAction() {
+                override fun actionPerformed(event: ActionEvent?) {
+                    System.err.println("[V-Clip] Up key received in rootPane fallback handler")
+                    viewModel.selectPrevious()
+                }
+            },
+        )
+        actionMap.put(
+            downActionKey,
+            object : AbstractAction() {
+                override fun actionPerformed(event: ActionEvent?) {
+                    System.err.println("[V-Clip] Down key received in rootPane fallback handler")
+                    viewModel.selectNext()
+                }
+            },
+        )
+
+        fun refreshHotkeyRegistrationIfPending(trigger: String) {
+            if (!hotkeyRefreshController.consumePendingRefreshAfterBlur()) {
+                return
+            }
+
+            System.err.println("[V-Clip] refreshing hotkey registration after blur ($trigger)")
+            viewModel.refreshHotkeyRegistration()
+        }
 
         fun handleBlur() {
             val now = System.currentTimeMillis()
-            if (spotlightWindowState.isVisible && spotlightController.shouldHideOnBlur(now)) {
+            val shouldHide = spotlightWindowState.isVisible && spotlightController.shouldHideOnBlur(now)
+            if (shouldHide) {
+                System.err.println("[V-Clip] blur → hiding window (now=$now ignoreBefore=${spotlightController.ignoreBlurBeforeEpochMillis})")
                 hideWindowContent(restorePreviousApplicationFocus = false)
+            } else if (spotlightWindowState.isVisible) {
+                System.err.println("[V-Clip] blur → deferred (now=$now ignoreBefore=${spotlightController.ignoreBlurBeforeEpochMillis})")
             }
         }
 
         val windowListener = object : WindowAdapter() {
             override fun windowGainedFocus(event: WindowEvent?) {
-                DragDebugLog.log("windowGainedFocus")
+                val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+                System.err.println("[V-Clip] windowGainedFocus (focusOwner=${focusOwner?.javaClass?.name})")
                 spotlightController.onWindowGainedFocus()
             }
 
             override fun windowLostFocus(event: WindowEvent?) {
-                DragDebugLog.log("windowLostFocus")
+                System.err.println("[V-Clip] windowLostFocus")
                 spotlightController.onWindowLostFocus()
+                refreshHotkeyRegistrationIfPending("windowLostFocus")
                 handleBlur()
             }
 
             override fun windowDeactivated(event: WindowEvent?) {
-                DragDebugLog.log("windowDeactivated")
+                System.err.println("[V-Clip] windowDeactivated")
                 spotlightController.onWindowLostFocus()
+                refreshHotkeyRegistrationIfPending("windowDeactivated")
                 handleBlur()
             }
         }
@@ -222,6 +302,14 @@ private fun FrameWindowScope.AppRootWindowContent(
         window.addWindowFocusListener(windowListener)
         window.addWindowListener(windowListener)
         onDispose {
+            inputMap.remove(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0))
+            inputMap.remove(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0))
+            inputMap.remove(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0))
+            inputMap.remove(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0))
+            actionMap.remove(enterActionKey)
+            actionMap.remove(escapeActionKey)
+            actionMap.remove(upActionKey)
+            actionMap.remove(downActionKey)
             window.removeWindowFocusListener(windowListener)
             window.removeWindowListener(windowListener)
         }
@@ -229,7 +317,7 @@ private fun FrameWindowScope.AppRootWindowContent(
 
     DisposableEffect(window) {
         onDispose {
-            visualEffectWindowStyler.dispose(window)
+            visualEffectWindowStyler.release(window)
         }
     }
 
@@ -256,7 +344,7 @@ private fun FrameWindowScope.AppRootWindowContent(
 
     LaunchedEffect(spotlightWindowState.isVisible) {
         if (spotlightWindowState.isVisible) {
-            DragDebugLog.log("windowShowStart")
+            System.err.println("[V-Clip] windowShowStart (isVisible=${spotlightWindowState.isVisible})")
             if (uiState.filteredItems.isNotEmpty()) {
                 listState.scrollToItem(0)
             }
@@ -266,7 +354,10 @@ private fun FrameWindowScope.AppRootWindowContent(
                 height = SpotlightWindowHeight,
             )
             window.setLocation(centeredLocation)
-            visualEffectWindowStyler.apply(window, currentTheme)
+            val visualOk = visualEffectWindowStyler.apply(window, currentTheme)
+            if (!visualOk) {
+                System.err.println("[V-Clip] visualEffect apply returned false — window may appear transparent")
+            }
             window.isVisible = true
             window.focusableWindowState = true
             MacAppActivation.requestForeground()
@@ -274,7 +365,7 @@ private fun FrameWindowScope.AppRootWindowContent(
             window.requestFocus()
             window.requestFocusInWindow()
             window.rootPane.requestFocusInWindow()
-            DragDebugLog.log("windowShowFocusedRequestsIssued")
+            System.err.println("[V-Clip] window show: focus requests issued (visualOk=$visualOk)")
 
             repeat(12) {
                 withFrameNanos { }
@@ -285,7 +376,7 @@ private fun FrameWindowScope.AppRootWindowContent(
             spotlightController.forceFocusRequest()
             delay(160L)
             spotlightController.forceFocusRequest()
-            DragDebugLog.log("windowShowFocusRetryBurstCompleted")
+            System.err.println("[V-Clip] windowShowFocusRetryBurstCompleted (isFocused=${spotlightController.isWindowFocused})")
         }
     }
 
@@ -335,6 +426,22 @@ private fun FrameWindowScope.AppRootWindowContent(
                 onToggleFavoritesOnly = viewModel::toggleFavoritesOnly,
             )
         }
+    }
+}
+
+private class HotkeyRefreshController {
+    private var pendingRefreshAfterBlur = false
+
+    fun requestRefreshAfterBlur() {
+        pendingRefreshAfterBlur = true
+    }
+
+    fun consumePendingRefreshAfterBlur(): Boolean {
+        if (!pendingRefreshAfterBlur) {
+            return false
+        }
+        pendingRefreshAfterBlur = false
+        return true
     }
 }
 

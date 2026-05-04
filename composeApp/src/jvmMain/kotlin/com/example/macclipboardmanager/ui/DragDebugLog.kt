@@ -1,7 +1,7 @@
 package com.example.macclipboardmanager.ui
 
 internal object DragDebugLog {
-    private const val enabled = true
+    private const val enabled = false
     private const val prefix = "[DEBUG-drag]"
 
     fun log(message: String) {

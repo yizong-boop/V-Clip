@@ -87,11 +87,13 @@ class MainViewModel(
 
         workerScope.launch {
             globalHotkeyManager.activations.collect {
+                System.err.println("[V-Clip] hotkey activation collected")
                 mutableEffects.emit(
                     MainEffect.ShowWindow(
                         requestedAtEpochMillis = clock(),
                     ),
                 )
+                System.err.println("[V-Clip] ShowWindow effect emitted")
             }
         }
     }
@@ -142,10 +144,16 @@ class MainViewModel(
 
     fun confirmSelection() {
         if (confirmSelectionInProgress) {
+            System.err.println("[V-Clip] confirmSelection skipped: already in progress")
             return
         }
 
-        val selectedText = mutableUiState.value.selectedItem?.text ?: return
+        val selectedItem = mutableUiState.value.selectedItem
+        if (selectedItem == null) {
+            System.err.println("[V-Clip] confirmSelection skipped: no item selected (filteredItems=${mutableUiState.value.filteredItems.size})")
+            return
+        }
+        val selectedText = selectedItem.text
         confirmSelectionInProgress = true
         repository.bumpSelectedItem(selectedText)
         val emitted = mutableEffects.tryEmit(
@@ -154,12 +162,35 @@ class MainViewModel(
             ),
         )
         if (!emitted) {
+            System.err.println("[V-Clip] confirmSelection failed: effect buffer full")
             confirmSelectionInProgress = false
+        } else {
+            System.err.println("[V-Clip] confirmSelection emitted (text len=${selectedText.length})")
         }
     }
 
     fun completeConfirmSelection() {
         confirmSelectionInProgress = false
+    }
+
+    fun setAllowCommandOverlayForNextActivation(enabled: Boolean) {
+        globalHotkeyManager.setAllowCommandOverlayForNextActivation(enabled)
+        System.err.println(
+            "[V-Clip] hotkey matcher command-overlay mode ${if (enabled) "enabled" else "disabled"}",
+        )
+    }
+
+    fun refreshHotkeyRegistration() {
+        if (!started || cleanedUp) {
+            return
+        }
+
+        runCatching {
+            globalHotkeyManager.register(defaultHotkey)
+            System.err.println("[V-Clip] hotkey registration refreshed")
+        }.onFailure { error ->
+            System.err.println("[V-Clip] hotkey registration refresh failed: ${error.message}")
+        }
     }
 
     fun showToast(message: String) {

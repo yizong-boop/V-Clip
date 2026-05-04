@@ -176,6 +176,7 @@ fun FrameWindowScope.ClipboardWindowContent(
 
                     Key.Enter,
                     Key.NumPadEnter -> {
+                        System.err.println("[V-Clip] Enter key received in Compose handler")
                         onConfirmSelection()
                         true
                     }
@@ -229,6 +230,10 @@ fun FrameWindowScope.ClipboardWindowContent(
                     focusRequester = focusRequester,
                     focusRequestKey = focusRequestKey,
                     onValueChange = onSearchQueryChange,
+                    onConfirmSelection = onConfirmSelection,
+                    onHideRequest = onHideRequest,
+                    onSelectPrevious = onSelectPrevious,
+                    onSelectNext = onSelectNext,
                     onToggleFavoritesOnly = {
                         onToggleFavoritesOnly()
                         restoreSearchFieldFocus()
@@ -300,6 +305,10 @@ private fun FrameWindowScope.ClipboardSearchField(
     focusRequester: FocusRequester,
     focusRequestKey: Int,
     onValueChange: (String) -> Unit,
+    onConfirmSelection: () -> Unit,
+    onHideRequest: () -> Unit,
+    onSelectPrevious: () -> Unit,
+    onSelectNext: () -> Unit,
     onToggleFavoritesOnly: () -> Unit,
 ) {
     var textFieldValue by remember {
@@ -372,7 +381,41 @@ private fun FrameWindowScope.ClipboardSearchField(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .focusRequester(focusRequester),
+                .focusRequester(focusRequester)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) {
+                        return@onPreviewKeyEvent false
+                    }
+
+                    when (event.key) {
+                        Key.DirectionUp -> {
+                            System.err.println("[V-Clip] Up key received in search field handler")
+                            onSelectPrevious()
+                            true
+                        }
+
+                        Key.DirectionDown -> {
+                            System.err.println("[V-Clip] Down key received in search field handler")
+                            onSelectNext()
+                            true
+                        }
+
+                        Key.Enter,
+                        Key.NumPadEnter -> {
+                            System.err.println("[V-Clip] Enter key received in search field handler")
+                            onConfirmSelection()
+                            true
+                        }
+
+                        Key.Escape -> {
+                            System.err.println("[V-Clip] Escape key received in search field handler")
+                            onHideRequest()
+                            true
+                        }
+
+                        else -> false
+                    }
+                },
             singleLine = true,
             textStyle = MaterialTheme.typography.headlineSmall.copy(
                 color = theme.primaryText,

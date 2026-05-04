@@ -16,26 +16,42 @@ internal class MacVisualEffectWindowStyler {
     private val visualEffectViews = WeakHashMap<Window, Pointer>()
     private val originalContentViews = WeakHashMap<Window, Pointer>()
 
-    fun apply(window: Window, theme: AppThemePreference) {
+    fun apply(window: Window, theme: AppThemePreference): Boolean {
         if (!MacPlatform.isMacOs()) {
-            return
+            return true
         }
 
+        var ok = true
         MacMainThreadDispatcher.dispatchSync {
             runCatching {
                 CocoaInterop.autoreleasePool {
                     when (theme) {
-                        AppThemePreference.FrostedGlass -> install(window)
+                        AppThemePreference.FrostedGlass -> {
+                            if (!install(window)) ok = false
+                        }
                         AppThemePreference.Solid -> remove(window)
                     }
                 }
             }.onFailure { error ->
                 System.err.println("Unable to apply macOS visual effect window style: ${error.message}")
+                ok = false
             }
         }
+        return ok
     }
 
     fun dispose(window: Window) {
+        if (!MacPlatform.isMacOs()) {
+            return
+        }
+
+        // Keep the visual effect installed while the Compose window is merely
+        // hidden. Toggling the NSWindow back to a "no effect" state during hide
+        // can briefly expose the transparent clear-color window before Swing
+        // processes the visibility change.
+    }
+
+    fun release(window: Window) {
         if (!MacPlatform.isMacOs()) {
             return
         }
@@ -49,32 +65,55 @@ internal class MacVisualEffectWindowStyler {
         }
     }
 
-    private fun install(window: Window) {
-        val nsWindow = window.nativeNsWindow() ?: return
-
-        configureTransparentWindow(nsWindow)
-
-        val originalContentView = originalContentViews[window]
-            ?: (ObjcRuntime.sendPointer(nsWindow, "contentView") ?: return).also { originalView ->
-                originalContentViews[window] = originalView
-            }
-        val hostView = ObjcRuntime.sendPointer(originalContentView, "superview") ?: return
-        val visualEffectView = visualEffectViews[window] ?: createVisualEffectView(window).also { view ->
-            ObjcRuntime.sendVoid(
-                hostView,
-                "addSubview:positioned:relativeTo:",
-                view,
-                NSWindowBelow,
-                originalContentView,
-            )
-            visualEffectViews[window] = view
+    private fun install(window: Window): Boolean {
+        val nsWindow = window.nativeNsWindow()
+        if (nsWindow == null) {
+            System.err.println("VisualEffect install failed: native NSWindow not ready (SkiaLayer init pending?)")
+            return false
         }
 
-        ObjcRuntime.sendVoid(visualEffectView, "setFrame:", window.nsRect())
-        ObjcRuntime.sendVoid(visualEffectView, "setHidden:", ObjcBoolFalse)
+        val originalContentView = originalContentViews[window]
+            ?: (ObjcRuntime.sendPointer(nsWindow, "contentView") ?: run {
+                System.err.println("VisualEffect install failed: NSWindow has no contentView")
+                return false
+            }).also { originalView ->
+                originalContentViews[window] = originalView
+            }
+        val hostView = ObjcRuntime.sendPointer(originalContentView, "superview")
+        if (hostView == null) {
+            System.err.println("VisualEffect install failed: contentView has no superview")
+            return false
+        }
+
+        val existingView = visualEffectViews[window]
+        val visualEffectView = if (existingView != null) {
+            existingView.also {
+                ObjcRuntime.sendVoid(it, "setFrame:", window.nsRect())
+                ObjcRuntime.sendVoid(it, "setHidden:", ObjcBoolFalse)
+            }
+        } else {
+            createVisualEffectView(window).also { view ->
+                ObjcRuntime.sendVoid(
+                    hostView,
+                    "addSubview:positioned:relativeTo:",
+                    view,
+                    NSWindowBelow,
+                    originalContentView,
+                )
+                visualEffectViews[window] = view
+            }
+        }
+
         ObjcRuntime.sendVoid(originalContentView, "setFrame:", window.nsRect())
         ObjcRuntime.sendVoid(originalContentView, "setAutoresizingMask:", NSViewWidthSizable or NSViewHeightSizable)
         configureRoundedLayer(originalContentView)
+
+        // Configure transparent window LAST, after the visual effect view is in
+        // the hierarchy. If install fails early (SkiaLayer not ready, etc.), the
+        // NSWindow keeps its default opaque background instead of clearColor,
+        // preventing a fully transparent window.
+        configureTransparentWindow(nsWindow)
+        return true
     }
 
     private fun remove(window: Window) {

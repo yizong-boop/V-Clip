@@ -9,5 +9,8 @@ interface GlobalHotkeyManager {
 
     fun unregister()
 
+    fun setAllowCommandOverlayForNextActivation(enabled: Boolean) {
+    }
+
     fun close()
 }

@@ -55,9 +55,18 @@ class SpotlightWindowController(
 
     fun onWindowGainedFocus() {
         isWindowFocused = true
-        ignoreBlurBeforeEpochMillis = 0L
         deferredBlurHideAtEpochMillis = 0L
         hasDeferredBlurHide = false
+        deferredBlurHideRequestKey += 1
+
+        // Shorten the blur grace period to a post-focus window long enough to
+        // absorb focus flutter during the show-phase retry burst (~624 ms),
+        // but short enough that intentional blur dismissal (clicking away,
+        // Cmd+Tab) takes effect quickly instead of waiting the full 1 200 ms.
+        val shortGrace = clock() + 400L
+        if (ignoreBlurBeforeEpochMillis > shortGrace) {
+            ignoreBlurBeforeEpochMillis = shortGrace
+        }
     }
 
     fun onWindowLostFocus() {
